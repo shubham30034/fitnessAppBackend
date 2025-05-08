@@ -6,8 +6,6 @@ const bcrypt = require('bcryptjs');
 // validation required for all controllers
 
 
-
-
 // Create Admin
 exports.createAdmin = async (req, res) => {
   try {

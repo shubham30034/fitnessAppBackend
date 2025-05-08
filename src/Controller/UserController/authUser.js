@@ -1,146 +1,189 @@
 const User = require('../../Model/userModel/userModel');
-const UserAdditionalInfo = require('../../Model/userModel/userAdditionalInfo');
-const otpGenerator = require('otp-generator');
-const request = require('request'); // For sending SMS using MSG91 API
-const RefreshToken = require('../../Model/userModel/refreshToken'); 
-const generateToken = require('../../Utils/Jwt'); // Assuming you have a utility function to generate JWT tokens
+// const UserAdditionalInfo = require('../../Model/userModel/userAdditionalInfo');
+const RefreshToken = require('../../Model/userModel/refreshToken');
+const {generateToken} = require('../../Utils/Jwt');
 const bcrypt = require('bcrypt');
+const Otp = require('../../Model/userModel/otpModel');
+const jwt = require('jsonwebtoken');
+const axios = require('axios');
+const fast2sms = require('fast-two-sms');
+const BlacklistedToken = require('../../Model/userModel/blackListedToken');
+require('dotenv').config();
 
-// Send OTP
-const sendOtp = async (req, res) => {
+
+
+
+
+const sendOtpToUser = async (user, phone) => {
+  const generateNumericOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
+  const otp = generateNumericOtp();
+  console.log("Generated OTP (numeric only):", otp);
+
+  const hashedOtp = await bcrypt.hash(otp, 10);
+  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  const saveOtp  = await Otp.create({
+    userId: user._id,
+    otp: hashedOtp,
+    expiresAt: otpExpiresAt,
+  });
+
+
+  if(!saveOtp) {
+    console.error('Failed to save OTP to database');
+    return null;
+  }
+
+
+
+  return otp
+  // const data = {
+  //   route: 'q', // transactional route
+  //   message: `Your OTP is ${otp}. It is valid for 10 minutes.`,
+  //   flash: 0,
+  //   numbers: phone
+  // };
+
+  // try {
+  //   const response = await axios.post(
+  //     'https://www.fast2sms.com/dev/bulkV2',
+  //     data,
+  //     {
+  //       headers: {
+  //         authorization: process.env.FAST2SMS_API_KEY,
+  //         'Content-Type': 'application/json'
+  //       }
+  //     }
+  //   );
+
+  //   console.log('Fast2SMS response:', response.data);
+
+  //   if (!response.data.return) {
+  //     console.error('Failed to send OTP. Response:', response.data);
+  //     return null;
+  //   }
+
+  //   return response.data;
+
+  // } catch (error) {
+  //   console.error('Axios/Fast2SMS Error:', error.response?.data || error.message);
+  //   return null;
+  // }
+};
+
+
+// Controller: Send OTP
+exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
-
-    // Find user by phone and check if role is 'user'
-    const user = await User.findOne({ phone }).populate('additionalInfo');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    if (user.role !== 'user') {
-      return res.status(403).json({ message: 'Only users with role "user" can log in' });
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'Phone number is required' });
     }
 
-    // Generate OTP (6 digits)
-    const otp = otpGenerator.generate(6, { upperCase: false, specialChars: false });
+    let user = await User.findOne({ phone }).populate('additionalInfo');
+    if (!user) {
+      user = await User.create({ phone, role: 'user' });
+    }
 
-    // Hash the OTP using bcrypt
-    const hashedOtp = await bcrypt.hash(otp, 10); // 10 is the saltRounds (the higher, the more secure but slower)
+    if (user.role !== 'user') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only users with role "user" can request OTP',
+      });
+    }
 
-    // Set OTP and expiry time (e.g., 10 minutes from now)
-    const expiryTime = new Date();
-    expiryTime.setMinutes(expiryTime.getMinutes() + 10); // Set expiry for 10 minutes
+    // Remove previous OTPs
+    await Otp.deleteMany({ userId: user._id });
 
-    // Save hashed OTP and expiry time to user model
-    user.otp = hashedOtp;
-    user.otpExpiresAt = expiryTime;
 
-    await user.save();
 
-    // Send OTP via SMS using MSG91 API
-    const message = `Your OTP is ${otp}. It is valid for 10 minutes.`;
-    const apiKey = process.env.MSG91_API_KEY;  // Replace with your actual MSG91 API key
-    const senderId = process.env.MSG91_SENDER_ID;   // Replace with your sender ID (e.g., 'MSGIND')
+    // Send new OTP
+  const otp =   await sendOtpToUser(user, phone);
+    if (!otp) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send OTP',
+      });
+    }
 
-    const smsUrl = `https://api.msg91.com/api/v2/sendsms`;
-
-    const options = {
-      url: smsUrl,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sender: senderId,
-        route: '4', // Route 4 for promotional SMS (adjust if needed)
-        country: '91', // Country code for India (change it accordingly for other countries)
-        sms: [
-          {
-            message: message,
-            to: [phone], // Array of phone numbers
-          },
-        ],
-      }),
-    };
-
-    // Send request to MSG91 API
-    request(options, (error, response, body) => {
-      if (error) {
-        return res.status(500).json({ message: 'Error sending OTP via SMS', error: error.message });
-      }
-
-      if (response.statusCode === 200) {
-        console.log(`OTP sent to ${phone}: ${otp}`);
-        res.status(200).json({ message: 'OTP sent successfully to your phone' });
-      } else {
-        res.status(500).json({ message: 'Failed to send OTP', error: body });
-      }
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent successfully',
+      otp: otp, // For testing purposes, remove in production
     });
 
   } catch (error) {
-    res.status(500).json({ message: 'Error sending OTP', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Error sending OTP',
+      error: error.message,
+    });
   }
 };
 
 // Verify OTP
-const verifyOtp = async (req, res) => {
+exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp } = req.body;
 
-    // Find user by phone and check if role is 'user'
     const user = await User.findOne({ phone }).populate('additionalInfo');
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    console.log("User found:", user);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
     if (user.role !== 'user') {
-      return res.status(403).json({ message: 'Only users with role "user" can log in' });
+      return res.status(403).json({ success: false, message: 'Only users with role \"user\" can log in' });
     }
 
-    // Check if OTP has expired manually
-    const currentTime = new Date();
-    if (currentTime > user.otpExpiresAt) {
-      return res.status(400).json({ message: 'OTP has expired, please request a new one' });
+    // ✅ Always fetch latest OTP
+    const userOtp = await Otp.findOne({ userId: user._id }).sort({ createdAt: -1 });
+
+    console.log("Fetched OTP:", userOtp);
+    console.log("Current time:", new Date());
+    console.log("OTP expiry:", userOtp?.expiresAt);
+
+    if (!userOtp || new Date() > userOtp.expiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired or not found, please request a new one',
+      });
     }
 
-    // Compare entered OTP with the hashed OTP
-    const isMatch = await bcrypt.compare(otp, user.otp);
+    const isMatch = await bcrypt.compare(otp, userOtp.otp);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid OTP' });
+      return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
-    // OTP is valid, clear OTP fields
-    user.otp = undefined;
-    user.otpExpiresAt = undefined;
-    await user.save();
+    await Otp.deleteOne({ _id: userOtp._id }); // remove used OTP
 
-    // Generate JWT token for the user access token and refresh token
-    const payload = {
-      id: user._id,
-      role: user.role,
-    };
-    const { accessToken, refreshToken } = generateToken(user._id, payload, '1h'); // 1 hour expiry for access token
+    // 🔐 Generate JWT
+    const payload = { id: user._id, role: user.role };
+    const { accessToken, refreshToken } = await generateToken(payload);
 
-    // Save refresh token in the user model (optional, if you want to store it)
-    const newRefreshToken = await RefreshToken.create({
-      userId: user._id,
-      token: refreshToken,
-    });
+    await RefreshToken.create({ userId: user._id, token: refreshToken });
 
-    // User is now logged in, return user details
     res.status(200).json({
+      success: true,
       message: 'OTP verified successfully, you are logged in',
       user: {
         id: user._id,
         phone: user.phone,
-        email: user.additionalInfo ? user.additionalInfo.email : 'Not Provided',
+        email: user.additionalInfo?.email || 'Not Provided',
         role: user.role,
-        tokens: {
-          accessToken,
-          refreshToken: newRefreshToken.token,
-        },
+        tokens: { accessToken, refreshToken },
       },
     });
+
   } catch (error) {
-    res.status(500).json({ message: 'Error verifying OTP', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Error verifying OTP',
+      error: error.message,
+    });
   }
 };
+
 
 // Regenerate Refresh Token
 exports.regenerateRefreshToken = async (req, res) => {
@@ -148,47 +191,35 @@ exports.regenerateRefreshToken = async (req, res) => {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
-      return res.status(400).json({ message: 'Refresh token is required' });
+      return res.status(400).json({ success: false, message: 'Refresh token is required' });
     }
 
-    // Verify the refresh token
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
     if (!decoded) {
-      return res.status(400).json({ message: 'Invalid refresh token' });
+      return res.status(400).json({ success: false, message: 'Invalid refresh token' });
     }
 
-    // Find token in DB
     const existingToken = await RefreshToken.findOne({ token: refreshToken });
     if (!existingToken) {
-      return res.status(400).json({ message: 'Invalid or expired refresh token' });
+      return res.status(400).json({ success: false, message: 'Invalid or expired refresh token' });
     }
 
-    // Optional: Delete old token (prevent reuse)
+    // Delete old token
     await RefreshToken.deleteOne({ token: refreshToken });
 
-    // Generate new tokens
-    const payload = {
-      id: decoded.id || decoded.userId, // ensure consistent structure
-      role: decoded.role,
-    };
-
+    const payload = { id: decoded.id || decoded.userId, role: decoded.role };
     const { accessToken, refreshToken: newRefreshToken } = generateToken(payload);
 
-    // Save new refresh token in DB
-    await RefreshToken.create({
-      userId: payload.id,
-      token: newRefreshToken,
-    });
+    await RefreshToken.create({ userId: payload.id, token: newRefreshToken });
 
     res.status(200).json({
+      success: true,
       message: 'Tokens regenerated successfully',
       accessToken,
       refreshToken: newRefreshToken,
     });
-
   } catch (error) {
-    console.error('Token regeneration error:', error);
-    res.status(500).json({ message: 'Error regenerating refresh token', error: error.message });
+    res.status(500).json({ success: false, message: 'Error regenerating refresh token', error: error.message });
   }
 };
 
@@ -196,38 +227,71 @@ exports.regenerateRefreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
+    const {token:accessToken} = req.headers
 
-    if (!refreshToken) {
-      return res.status(400).json({ message: 'Refresh token is required' });
+  
+
+    if (!refreshToken || !accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token and access token are required',
+      });
     }
 
-    await RefreshToken.deleteOne({ token: refreshToken });
+    // ❌ Delete refresh token from DB
+    const deleted = await RefreshToken.deleteOne({ token: refreshToken });
+    if (deleted.deletedCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired refresh token',
+      });
+    }
 
-    res.status(200).json({ message: 'Logged out successfully' });
+    // 🛑 Decode the access token and store in blacklist
+    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
+    const expiresAt = new Date(decoded.exp * 1000);
+
+    await BlacklistedToken.create({ token: accessToken, expiresAt });
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully, token blacklisted',
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Error during logout', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout',
+      error: error.message,
+    });
   }
 };
 
 // Get Current User
 exports.getCurrentUser = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
+    console.log("User ID from token:", userId);
 
     const user = await User.findById(userId).populate('additionalInfo');
-    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+
 
     res.status(200).json({
-      id: user._id,
-      phone: user.phone,
-      email: user.additionalInfo?.email || '',
-      name: user.additionalInfo?.name || '',
-      address: user.additionalInfo?.address || '',
-      role: user.role,
+      success: true,
+      user: {
+        id: user._id,
+        phone: user.phone,
+        email: user.additionalInfo?.email || '',
+        name: user.additionalInfo?.name || '',
+        address: user.additionalInfo?.address || '',
+        role: user.role,
+      },
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching user', error: error.message });
+    res.status(500).json({ success: false, message: 'Error fetching user', error: error.message });
   }
 };
-
-
