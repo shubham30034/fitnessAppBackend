@@ -14,6 +14,7 @@ require('dotenv').config();
 
 
 
+
 const sendOtpToUser = async (user, phone) => {
   const generateNumericOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
   const otp = generateNumericOtp();

@@ -1,21 +1,59 @@
 const UserAdditionalInfo = require('../../Models/UserAdditionalInfo');
 const User = require('../../Models/User'); // Assuming you have a User model
+const uploadFileToCloudinary = require("../../Utils/imageUploader")
+const path = require('path');
+
 
 exports.createAdditionalInfo = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { name, email, address, profilePicture } = req.body;
+    const { name, email, address } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
 
+    // Step 1: Check if additional info already exists
     const existingInfo = await UserAdditionalInfo.findOne({ userId });
     if (existingInfo) {
-      return res.status(400).json({ success: false, message: 'Additional info already exists for this user' });
+      return res.status(400).json({
+        success: false,
+        message: 'Additional info already exists for this user',
+      });
     }
 
+    // Step 2: Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Step 3: Check if image file is provided
+    const file = req.files?.imageFile;
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "Image file is required",
+      });
+    }
+
+    // Step 4: Validate file type
+    const supportedTypes = ["jpg", "jpeg", "png"];
+    const fileType = path.extname(file.name).substring(1).toLowerCase();
+    const isFileSupported = (type, types) => types.includes(type);
+
+    if (!isFileSupported(fileType, supportedTypes)) {
+      return res.status(400).json({
+        success: false,
+        message: "File type not supported",
+      });
+    }
+
+    // Step 5: Upload file to Cloudinary
+    const response = await uploadFileToCloudinary(file, "Codehelp");
+    const profilePicture = response.secure_url;
+
+    // Step 6: Save additional info
     const additionalInfo = new UserAdditionalInfo({
       userId,
       name,
@@ -26,23 +64,25 @@ exports.createAdditionalInfo = async (req, res) => {
 
     await additionalInfo.save();
 
+    // Step 7: Link to user
     user.additionalInfo = additionalInfo._id;
     await user.save();
 
     res.status(201).json({
       success: true,
       message: 'Additional info created successfully',
-      data: additionalInfo
+      data: additionalInfo,
     });
 
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Error creating additional info',
-      error: error.message
+      error: error.message,
     });
   }
 };
+
 
 exports.getAdditionalInfo = async (req, res) => {
   try {
