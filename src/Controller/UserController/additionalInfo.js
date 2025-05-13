@@ -1,6 +1,6 @@
 const UserAdditionalInfo = require('../../Models/UserAdditionalInfo');
 const User = require('../../Models/User'); // Assuming you have a User model
-const uploadFileToCloudinary = require("../../Utils/imageUploader")
+const {uploadFileToCloudinary} = require("../../Utils/imageUploader")
 const path = require('path');
 
 
@@ -86,7 +86,7 @@ exports.createAdditionalInfo = async (req, res) => {
 
 exports.getAdditionalInfo = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
 
     const additionalInfo = await UserAdditionalInfo.findOne({ userId }).populate({
       path: 'userId',

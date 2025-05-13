@@ -1,5 +1,5 @@
-const User = require('../models/User');
-const UserAdditionalInfo = require('../models/UserAdditionalInfo');
+const User = require('../../Model/userModel/userModel');
+const UserAdditionalInfo = require('../../Model/userModel/additionalInfo');
 const bcrypt = require('bcryptjs');
 
 
@@ -144,3 +144,50 @@ exports.deleteUser = async (req, res) => {
     res.status(500).json({ message: 'Error deleting user', error: err.message });
   }
 };
+
+// getProducts Invoice
+exports.getAllInvoices = async (req, res) => {
+  try {
+    const allOrders = await Order.find({})
+      .populate('productId')
+      .populate('userId');
+
+    if (!allOrders || allOrders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found",
+      });
+    }
+
+    // 🧾 Build invoice-like data
+    const invoices = allOrders.map((order) => ({
+      invoiceId: `INV-${order._id}`,
+      userName: order.userId.name,
+      userEmail: order.userId.email,
+      productName: order.productId.name,
+      quantity: order.quantity,
+      pricePerItem: order.productId.price,
+      totalAmount: order.totalPrice,
+      address: order.address,
+      paymentStatus: order.paymentStatus,
+      orderStatus: order.status,
+      orderDate: order.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "All invoices fetched successfully",
+      invoices,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error generating invoices",
+      error: error.message,
+    });
+  }
+};
+
+
+
+// get all admin coaches and seller list

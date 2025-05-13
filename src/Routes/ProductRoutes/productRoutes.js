@@ -1,6 +1,7 @@
 const express = require("express");
 const route = express.Router();
 
+// ✅ Controllers
 const {
   createProduct,
   getAllProducts,
@@ -19,6 +20,14 @@ const {
 } = require("../../Controller/ProductsController/subcategory");
 
 const {
+  buyProduct,
+  verifySignature,
+  getAllOrdersOfUser,
+  getInvoice,
+} = require("../../Controller/ProductsController/buyProduct");
+
+// ✅ Middleware
+const {
   authentication,
   isAdmin,
   isCoach,
@@ -27,24 +36,28 @@ const {
   isUser,
 } = require("../../Middleware/userAuth");
 
-const { buyProduct, verifySignature } = require("../../Controller/ProductsController/buyProduct");
+// ======================= Product Routes =======================
+route.post("/products", authentication, isSeller, createProduct);         // Only sellers
+route.get("/products", authentication, getAllProducts);                   // All users
+route.get("/products/:id", authentication, getSingleProduct);             // All users
+route.delete("/products/:id", authentication, isSuperAdmin, deleteProduct); // Only super admin
 
-// Product routes
-route.post("/products", authentication, isSeller, createProduct);      // Only sellers can create
-route.get("/products", authentication, getAllProducts);                                 // Public access
-route.get("/products/:id", authentication, getSingleProduct);                           // Public access
-route.delete("/products/:id", authentication, isSuperAdmin, deleteProduct);  // Only admins can delete
+// ======================= Category Routes =======================
+route.post("/categories", authentication, isSuperAdmin, createCategory);  // Only super admin
+route.get("/categories", getAllCategories);                               // Public
 
-// Category routes
-route.post("/categories", authentication, isSuperAdmin, createCategory);     // Only admins can create
-route.get("/categories", getAllCategories);                              // Public access
+// ======================= Subcategory Routes =======================
+route.post("/subcategories", authentication, isAdmin, createSubCategory); // Only admin
+route.get("/subcategories", getAllSubCategories);                         // Public
 
-// Subcategory routes
-route.post("/subcategories", authentication, isAdmin, createSubCategory); // Only admins
-route.get("/subcategories", getAllSubCategories);                         // Public access
+// ======================= Payment & Order Routes =======================
+route.post("/buy", authentication, isUser, buyProduct);                   // User initiates purchase
+route.post("/verify-signature", verifySignature);                         // Razorpay webhook
 
-// Payment-related routes
-route.post("/buy", authentication, isUser, buyProduct); // Any authenticated user can buy
-route.post("/verify-signature", verifySignature);     // Razorpay webhook for verifying payment
+// ✅ New: Get all orders of a user
+route.get("/orders", authentication, isUser, getAllOrdersOfUser);
+
+// ✅ New: Get invoice for a specific order
+route.get("/invoice/:orderId", authentication, isUser, getInvoice);
 
 module.exports = route;

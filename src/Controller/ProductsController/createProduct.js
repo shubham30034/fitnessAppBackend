@@ -1,7 +1,6 @@
 const Product = require("../../Model/ProductsModel/product");
 const Category = require("../../Model/ProductsModel/category");
-const uploadImageToCloudinary = require("../../utils/uploadImageToCloudinary"); // single file
-const { uploadMultipleImagesToCloudinary } = require("../../utils/uploadImageToCloudinary"); // for multiple files
+const { uploadMultipleImagesToCloudinary } = require("../../Utils/imageUploader"); // for multiple files
 
 exports.createProduct = async (req, res) => {
   try {
@@ -153,6 +152,13 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
+
+
+
+
+// get all products of a seller
+
+
 
 
 

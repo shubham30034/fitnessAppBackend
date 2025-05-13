@@ -7,6 +7,7 @@ const {
   createCoach,
   getAllUsers,
   deleteUser,
+  getAllInvoices
 } = require("../../Controller/SuperAdminController/superAdmin");
 
 // Middleware to protect super admin routes
@@ -17,5 +18,6 @@ router.post("/create-admin", authentication, isSuperAdmin, createAdmin);
 router.post("/create-coach", authentication, isSuperAdmin, createCoach);
 router.get("/users", authentication, isSuperAdmin, getAllUsers);
 router.delete("/user/:id", authentication, isSuperAdmin, deleteUser);
+router.get("/invoices", authentication, isSuperAdmin, getAllInvoices);
 
 module.exports = router;

@@ -1,6 +1,6 @@
-const Product = require('../../models/Product');
-const Order = require('../../models/Order');
-const { instance } = require("../config/razerpay");
+const Product = require('../../Model/ProductsModel/product');
+const Order = require('../../Model/ProductsModel/orderSchema');
+const { instance } = require("../../Config/razerpay");
 const crypto = require("crypto");
 
 
@@ -159,3 +159,94 @@ exports.verifySignature = async (req, res) => {
     });
   }
 };
+
+
+exports.getAllOrdersOfUser = async (req, res) => {
+   try {
+    const { userId } = req.user;
+    const orders = await Order.find({ userId }).populate("productId");
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found for this user.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully",
+      orders,
+    });
+    
+   } catch (error) {
+     return res.status(500).json({
+        success: false,
+        message: "Error fetching orders",
+        error: error.message,
+     })
+   }
+
+}
+
+
+
+exports.getInvoice = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { orderId } = req.params;
+
+    // ✅ Find the order and populate product details
+    const order = await Order.findOne({ _id: orderId, userId }).populate('productId');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const product = order.productId;
+
+    // ✅ Create basic invoice data
+    const invoice = {
+      invoiceId: `INV-${order._id}`,
+      userId: order.userId,
+      productName: product.name,
+      quantity: order.quantity,
+      pricePerItem: product.price,
+      totalAmount: order.totalPrice,
+      address: order.address,
+      paymentStatus: order.paymentStatus,
+      orderStatus: order.status,
+      orderDate: order.createdAt,
+    };
+
+    // ✅ Send JSON invoice (or render as HTML/PDF if needed)
+    res.status(200).json({
+      success: true,
+      message: "Invoice generated successfully",
+      invoice,
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate invoice",
+      error: error.message,
+    });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+

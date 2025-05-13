@@ -1,4 +1,4 @@
-const Category = require('../../models/Category');
+const Category = require('../../Model/ProductsModel/category');
 
 
 exports.createCategory = async (req, res) => {
@@ -76,6 +76,11 @@ exports.getAllCategories = async (req, res) => {
         });
     }
 };
+
+
+
+
+// get all products of a category for a specific user
 
 
 

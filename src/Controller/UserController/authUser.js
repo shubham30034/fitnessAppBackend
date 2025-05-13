@@ -6,12 +6,9 @@ const bcrypt = require('bcrypt');
 const Otp = require('../../Model/userModel/otpModel');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
-const fast2sms = require('fast-two-sms');
+
 const BlacklistedToken = require('../../Model/userModel/blackListedToken');
 require('dotenv').config();
-
-
-
 
 
 
@@ -184,6 +181,7 @@ exports.verifyOtp = async (req, res) => {
     });
   }
 };
+
 
 
 // Regenerate Refresh Token
