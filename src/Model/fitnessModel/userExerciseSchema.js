@@ -5,7 +5,8 @@ const userExerciseSchema = new mongoose.Schema({
   exerciseId: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Exercise', 
-    required: true
+    required: true,
+    unique: true // Ensure each user can only have one entry per exercise
    }, // Same `exerciseId` as in Exercise schema
   addedAt: { type: Date, default: Date.now }
 });

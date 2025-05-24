@@ -1,7 +1,46 @@
 const axios = require('axios');
 const Exercise = require('../../Model/fitnessModel/exercise');
+const fs = require('fs');
+const path = require('path');
 
 require('dotenv').config();
+
+exports.getAllExercisesFromJson = async (req, res) => {
+  try {
+    // Load and parse the JSON file
+    const filePath = path.join(__dirname, 'exercises.json');
+    const rawData = fs.readFileSync(filePath);
+    const exercises = JSON.parse(rawData);
+
+    // Map JSON data to match your schema (rename id → exerciseId)
+    const formattedExercises = exercises.map(ex => ({
+      exerciseId: ex.id,
+      name: ex.name,
+      force: ex.force,
+      level: ex.level,
+      mechanic: ex.mechanic,
+      equipment: ex.equipment,
+      primaryMuscles: ex.primaryMuscles,
+      secondaryMuscles: ex.secondaryMuscles,
+      instructions: ex.instructions,
+      category: ex.category,
+      images: ex.images
+    }));
+
+    // Insert into DB (ignore duplicates)
+    await Exercise.insertMany(formattedExercises, { ordered: false });
+
+    res.status(201).json({ message: 'Exercises inserted successfully' });
+  } catch (err) {
+    if (err.code === 11000) {
+      res.status(409).json({ message: 'Some duplicates were skipped', error: err });
+    } else {
+      res.status(500).json({ message: 'Failed to insert exercises', error: err.message });
+    }
+  }
+};
+
+
 
 exports.getAllExercises = async (req, res) => {
     try {
@@ -43,48 +82,77 @@ exports.getAllExercises = async (req, res) => {
     }
 };
 
+exports.getExerciseByMuscelAndLevel = async (req, res) => {
+  try {
+    // Get the muscle and level from the request body
+    const { muscle, level } = req.body;
+
+    // Validate the muscle and level
+    if (!muscle || !level) {
+      return res.status(400).json({
+        status: false,
+        message: "Muscle and level are required",
+      });
+    }
+
+    // Fetch exercises by muscle and level from the database
+    const response = await Exercise.find({
+      primaryMuscles: { $in: [muscle] },
+      level: level
+    });
+
+    // Return the result (even if empty)
+    return res.status(200).json({
+      status: true,
+      message: response.length > 0
+        ? "Exercises fetched successfully"
+        : "No exercises found for the given muscle and level",
+      data: response,
+    });
+
+  } catch (error) {
+    console.error("Error fetching exercises by muscle and level:", error);
+    res.status(500).json({
+      status: false,
+      message: "Error fetching exercises by muscle and level",
+      error: error.message,
+    });
+  }
+};
 
 
-
-const exerciseCache = {};
 
 exports.getExerciseById = async (req, res) => {
 
     try {
+        // Get the exercise ID from the request body
         const { exerciseId } = req.body;
-        console.log('Fetching exercise with ID:', exerciseId);
 
-        // Check if the exercise data is already cached
-        if (exerciseCache[exerciseId]) {
-            console.log('Returning cached data for exerciseId:', exerciseId);
-            return res.status(200).json({
-                status: true,
-                message: "Exercise fetched from cache successfully",
-                data: exerciseCache[exerciseId],
+        // Validate the exercise ID
+        if (!exerciseId) {
+            return res.status(400).json({
+                status: false,
+                message: "Exercise ID is required",
             });
         }
 
-        // If not cached, fetch the exercise data from the API
-        const options = {
-            method: 'GET',
-            url: `https://exercisedb.p.rapidapi.com/exercises/exercise/${exerciseId}`,
-            headers: {
-                'x-rapidapi-key': `${process.env.RAPIDAPI_KEY}`,
-                'x-rapidapi-host': 'exercisedb.p.rapidapi.com',
-            },
-        };
 
-        const response = await axios.request(options);
-        console.log('Fetched exercise data from API:', response.data);
+        // Fetch the exercise by ID from the database
+        const response = await Exercise.findOne({ exerciseId: exerciseId });
 
-        // Cache the exercise data (store the gifUrl as well)
-        exerciseCache[exerciseId] = response.data;
+        // Check if the exercise was found
+        if (!response) {
+            return res.status(404).json({
+                status: false,
+                message: "Exercise not found",
+            });
+        }
 
         // Return the fetched data
         res.status(200).json({
             status: true,
             message: "Exercise fetched successfully",
-            data: response.data,
+            data: response,
         });
     } catch (error) {
         console.error("Error fetching exercise by ID:", error);

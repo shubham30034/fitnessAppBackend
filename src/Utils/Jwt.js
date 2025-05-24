@@ -5,7 +5,7 @@ exports.generateToken = async(payload) => {
 
   try {
     const accessToken = await jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: '1h',
+      expiresIn: '1d',
     });
   
     const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN, {

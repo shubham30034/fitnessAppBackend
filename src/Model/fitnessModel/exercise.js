@@ -10,13 +10,38 @@ const exerciseSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  bodyPart: {
+  force: {
+    type: String
+  },
+  level: {
+    type: String
+  },
+  mechanic: {
     type: String,
-    required: true
+    default: null
   },
   equipment: {
     type: String,
     required: true
+  },
+  primaryMuscles: {
+    type: [String],
+    default: []
+  },
+  secondaryMuscles: {
+    type: [String],
+    default: []
+  },
+  instructions: {
+    type: [String],
+    default: []
+  },
+  category: {
+    type: String
+  },
+  images: {
+    type: [String],
+    default: []
   }
 });
 

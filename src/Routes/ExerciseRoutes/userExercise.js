@@ -9,9 +9,10 @@ const {
   updateSet,
   getRecordedSets,
   getSetsByDate,
-getExerciseRepsPreviousDay,
+previousWorkOutOfExercise,
 getExerciseRepsAnalytics,
-getExerciseRepsToday
+getExerciseRepsToday,
+compareTodayWithPreviousWorkout
 } = require('../../Controller/ExerciseController/userExercise');
 
 const { authentication } = require("../../Middleware/userAuth");
@@ -25,9 +26,10 @@ router.delete('/', authentication, removeUserExercises);
 router.post('/set', authentication, recordSet);
 router.patch('/set', authentication, updateSet);
 router.get('/set', authentication, getRecordedSets);
-router.get('/set/previous-day', authentication, getExerciseRepsPreviousDay);
+router.get('/set/previous-sets', authentication, previousWorkOutOfExercise);
 router.get('/set/today', authentication, getExerciseRepsToday);
 router.get('/sets/by-date', authentication, getSetsByDate);
+router.get('/set/compare',authentication,compareTodayWithPreviousWorkout)
 
 // Analytics Routes
 router.get('/analytics', authentication,  getExerciseRepsAnalytics);

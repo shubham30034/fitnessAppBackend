@@ -70,6 +70,7 @@ const sendOtpToUser = async (user, phone) => {
 };
 
 
+
 // Controller: Send OTP
 exports.sendOtp = async (req, res) => {
   try {
@@ -90,13 +91,25 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
-    // Remove previous OTPs
+    // ✅ Step 1: Check cooldown (60 seconds)
+    const recentOtp = await Otp.findOne({
+      userId: user._id,
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) } // last 60 seconds
+    });
+
+    if (recentOtp) {
+      const secondsRemaining = Math.ceil((recentOtp.createdAt.getTime() + 60 * 1000 - Date.now()) / 1000);
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${secondsRemaining} seconds before requesting a new OTP`,
+      });
+    }
+
+    // ✅ Step 2: Remove all previous OTPs (optional but clean)
     await Otp.deleteMany({ userId: user._id });
 
-
-
-    // Send new OTP
-  const otp =   await sendOtpToUser(user, phone);
+    // ✅ Step 3: Send new OTP
+    const otp = await sendOtpToUser(user, phone);
     if (!otp) {
       return res.status(500).json({
         success: false,
@@ -107,7 +120,7 @@ exports.sendOtp = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'OTP sent successfully',
-      otp: otp, // For testing purposes, remove in production
+      otp: otp, // ❗ REMOVE THIS IN PRODUCTION
     });
 
   } catch (error) {
@@ -118,6 +131,7 @@ exports.sendOtp = async (req, res) => {
     });
   }
 };
+
 
 // Verify OTP
 exports.verifyOtp = async (req, res) => {
@@ -159,7 +173,15 @@ exports.verifyOtp = async (req, res) => {
     const payload = { id: user._id, role: user.role };
     const { accessToken, refreshToken } = await generateToken(payload);
 
-    await RefreshToken.create({ userId: user._id, token: refreshToken });
+    // delete Old RefreshToken 
+   await RefreshToken.deleteOne({ userId: user._id });
+
+const createRefreshToken = await RefreshToken.create({ 
+  userId: user._id, 
+  token: refreshToken 
+});
+
+
 
     res.status(200).json({
       success: true,
@@ -228,6 +250,7 @@ exports.logout = async (req, res) => {
     const { refreshToken } = req.body;
     const {token:accessToken} = req.headers
 
+    console.log("refreshToken",refreshToken)
   
 
     if (!refreshToken || !accessToken) {
@@ -239,6 +262,11 @@ exports.logout = async (req, res) => {
 
     // ❌ Delete refresh token from DB
     const deleted = await RefreshToken.deleteOne({ token: refreshToken });
+
+  console.log(deleted,"deleted");
+  
+
+
     if (deleted.deletedCount === 0) {
       return res.status(400).json({
         success: false,

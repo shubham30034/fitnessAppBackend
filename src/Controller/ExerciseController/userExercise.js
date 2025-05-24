@@ -1,58 +1,90 @@
 // controllers/userExerciseController.js
 const UserExercise = require('../../Model/fitnessModel/userExerciseSchema');
 const Set = require('../../Model/fitnessModel/setSchema');
-
-
+const mongoose = require('mongoose');
 
 exports.addUserExercises = async (req, res) => {
   try {
+    // get userId and exerciseIds userId from the request and exerciseIds from the request body
     const userId = req.user.id;
     const { exerciseIds } = req.body; // expect an array of exerciseId strings
 
     console.log('exerciseIds:', exerciseIds);
 
-  if(!exerciseIds) {
-    return res.status(400).json({ 
+    // Validate userId and exerciseIds
+    if (!exerciseIds) {
+      return res.status(400).json({
         success: false,
         message: "exerciseIds is required",
-    })
-  }
+      });
+    }
+
+
+
 
     if (!Array.isArray(exerciseIds) || exerciseIds.length === 0) {
       return res.status(400).json({ error: 'exerciseIds must be a non-empty array' });
     }
 
-    // Find already added ones
+    // Convert exerciseIds to ObjectIds if they are strings
+    const objectIds = exerciseIds.map(id => new mongoose.Types.ObjectId(id));
+
+    // Find already added ones (compare ObjectId correctly)
     const existing = await UserExercise.find({
       userId,
-      exerciseId: { $in: exerciseIds }
+      exerciseId: { $in: objectIds }
     });
 
-    const existingIds = existing.map(ex => ex.exerciseId);
+
+
+    // Convert existing exerciseIds to string for comparison
+    const existingIds = existing.map(ex => ex.exerciseId.toString());
 
     // Filter out duplicates
     const newExerciseIds = exerciseIds.filter(id => !existingIds.includes(id));
 
+    if (newExerciseIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'All exercises are already added.',
+        added: [],
+        skipped: existingIds // list of already added ones
+      });
+    }
+
     // Prepare bulk documents
     const newExercises = newExerciseIds.map(id => ({
       userId,
-      exerciseId: id
+      exerciseId: new mongoose.Types.ObjectId(id), // Make sure this is a valid ObjectId
     }));
 
-    // Insert many
-    const inserted = await UserExercise.insertMany(newExercises);
+    // Insert many and handle errors for duplicates
+    try {
+      const inserted = await UserExercise.insertMany(newExercises, { ordered: false });
 
-    res.status(201).json({
+      res.status(201).json({
         success: true,
-      message: 'Exercises added successfully',
-      added: inserted,
-      skipped: existingIds // list of ones already present
-    });
+        message: 'Exercises added successfully',
+        added: inserted,
+        skipped: existingIds, // list of already present
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        // Handle duplicate key error from MongoDB's unique constraint
+        return res.status(409).json({
+          success: false,
+          message: 'Duplicate exercises found, some exercises were not added.',
+        });
+      }
+      throw err; // Re-throw other unexpected errors
+    }
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to add exercises to tracker' });
   }
 };
+
 
 
 exports.getUserExercises = async (req, res) => {
@@ -67,9 +99,9 @@ exports.getUserExercises = async (req, res) => {
       });
     }
 
-    const userExercises = await UserExercise.find({ userId }).populate({
+    const userExercises = await UserExercise.find({ userId:userId }).populate({
       path: 'exerciseId',
-      select: 'name bodyPart equipment',
+      select: 'name primaryMuscles equipment',
     });
 
     if (!userExercises || userExercises.length === 0) {
@@ -138,6 +170,35 @@ exports.removeUserExercises = async (req, res) => {
 }
 
 
+exports.setRestTime = async (req, res) => {
+  try {
+    const { userId, restTime } = req.body;
+
+    // Validate rest time
+    if (![2, 3, 5].includes(restTime)) {
+      return res.status(400).json({ success: false, message: 'Rest time must be 2, 3, or 5 minutes' });
+    }
+
+    // Update the user's rest time
+    const user = await User.findByIdAndUpdate(userId, { restTime }, { new: true });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Rest time set successfully',
+      restTime: user.restTime,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error setting rest time',
+      error: error.message,
+    });
+  }
+};
+
 
 
 // record a set for a tracked exercise
@@ -153,8 +214,26 @@ exports.recordSet = async (req, res) => {
       });
     }
 
+    // check if userExerciseId is valid
+    const userExercise = await UserExercise.findById({_id: userExerciseId});
+
+
+    // if not valid, return error
+    if (!userExercise) {
+      return res.status(404).json({
+        success: false,
+        message: 'User exercise not found'
+      });
+    }
+
+
+    // create a new set and enter the data in database
     const set = new Set({ userExerciseId, reps, weight, notes, userId }); // ✅ include notes
     await set.save();
+
+
+
+    // return success response
 
     res.status(201).json({
       success: true,
@@ -224,6 +303,23 @@ exports.getExerciseRepsToday = async (req, res) => {
       });
     }
 
+
+  // Check if userExerciseId is valid
+
+    const userExercise = await UserExercise.findById({_id: userExerciseId});
+
+
+    if (!userExercise) {
+      return res.status(404).json({
+        success: false,
+        message: 'User exercise not found'
+      });
+    }
+
+
+
+
+
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
 
@@ -242,6 +338,14 @@ exports.getExerciseRepsToday = async (req, res) => {
       },
     });
 
+
+    if (!sets || sets.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No sets found for today',
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'User exercise sets fetched successfully',
@@ -259,15 +363,9 @@ exports.getExerciseRepsToday = async (req, res) => {
 
 
 
-// Helper to get the previous day's date in 'YYYY-MM-DD' format
-function getPreviousDayDate() {
-  const yesterday = new Date();
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1); // Ensure UTC alignment
-  return yesterday.toISOString().split('T')[0]; // 'YYYY-MM-DD'
-}
 
-// Get exercise reps for the previous day
-exports.getExerciseRepsPreviousDay = async (req, res) => {
+// get previous workout of that exercise
+exports.previousWorkOutOfExercise = async (req, res) => {
   try {
     const userId = req.user.id;
     const { userExerciseId } = req.body;
@@ -275,61 +373,261 @@ exports.getExerciseRepsPreviousDay = async (req, res) => {
     if (!userExerciseId) {
       return res.status(400).json({
         success: false,
-        message: 'userExerciseId is required',
+        message: "Please provide userExerciseId",
       });
     }
 
-    const previousDayDate = getPreviousDayDate();
-
-    const start = new Date(`${previousDayDate}T00:00:00.000Z`); // Start of previous day in UTC
-    const end = new Date(`${previousDayDate}T23:59:59.999Z`); // End of previous day in UTC
-
-    // Log the start and end dates to check for correctness
-    console.log('Previous Day Start:', start);
-    console.log('Previous Day End:', end);
-
-    // Fetch sets from the database within the previous day date range
-    const sets = await Set.find({
-      userId,
-      userExerciseId,
-      date: { $gte: start, $lte: end }, // Date range for previous day
-    })
-      .sort({ date: 1 }) // Optional: Sort by exercise date
-      .populate({
-        path: 'userExerciseId',
-        populate: {
-          path: 'exerciseId',
-          select: 'name bodyPart equipment',
+    // Step 1: Find last 5 distinct workout dates (descending)
+    const lastWorkoutDates = await Set.aggregate([
+      {
+        $match: {
+          userExerciseId: new mongoose.Types.ObjectId(userExerciseId),
+          userId: new mongoose.Types.ObjectId(userId),
         },
-      });
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$date" }
+          },
+        },
+      },
+      {
+        $sort: { _id: -1 } // latest dates first
+      },
+      {
+        $limit: 5
+      }
+    ]);
 
-    if (!sets.length) {
+    if (!lastWorkoutDates.length) {
       return res.status(404).json({
         success: false,
-        message: 'No sets found for this exercise on the previous day',
+        message: "No previous workout found for this exercise",
       });
     }
 
-    // Calculate total reps for the previous day
-    const totalRepsPreviousDay = sets.reduce((total, set) => total + (set.reps || 0), 0);
+    // Step 2: Fetch sets grouped by those dates
+    const dates = lastWorkoutDates.map(d => d._id); // ["2025-05-13", "2025-05-10", ...]
+
+    const sets = await Set.aggregate([
+      {
+        $match: {
+          userExerciseId: new mongoose.Types.ObjectId(userExerciseId),
+          userId: new mongoose.Types.ObjectId(userId),
+          date: {
+            $gte: new Date(dates[dates.length - 1]), // oldest date in the list
+          }
+        }
+      },
+      {
+        $addFields: {
+          workoutDate: {
+            $dateToString: { format: "%Y-%m-%d", date: "$date" }
+          }
+        }
+      },
+      {
+        $match: {
+          workoutDate: { $in: dates }
+        }
+      },
+      {
+        $sort: { date: -1 }
+      },
+      {
+        $lookup: {
+          from: "userexercises",
+          localField: "userExerciseId",
+          foreignField: "_id",
+          as: "userExercise"
+        }
+      },
+      { $unwind: "$userExercise" },
+      {
+        $lookup: {
+          from: "exercises",
+          localField: "userExercise.exerciseId",
+          foreignField: "_id",
+          as: "exercise"
+        }
+      },
+      { $unwind: "$exercise" },
+      {
+        $project: {
+          reps: 1,
+          weight: 1,
+          date: 1,
+          workoutDate: 1,
+          notes: 1,
+          restTime: 1,
+          exercise: {
+            name: "$exercise.name",
+            bodyPart: "$exercise.bodyPart",
+            equipment: "$exercise.equipment"
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$workoutDate",
+          sets: { $push: "$$ROOT" }
+        }
+      },
+      {
+        $sort: { _id: -1 }
+      }
+    ]);
 
     return res.status(200).json({
       success: true,
-      message: 'Exercise reps for the previous day fetched successfully',
-      exercise: sets[0]?.userExerciseId?.exerciseId,
-      previousDayDate,
-      totalRepsPreviousDay,
-      sets,
+      message: "Previous workout sessions fetched successfully",
+      data: sets,
     });
+
   } catch (error) {
-    console.error('Error in getExerciseRepsPreviousDay:', error);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error while fetching exercise reps for the previous day',
+      message: "Internal server error while fetching previous workout",
       error: error.message,
     });
   }
 };
+
+
+
+// camapare previous workout with lates date workout 
+exports.compareTodayWithPreviousWorkout = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userExerciseId } = req.body;
+
+    if (!userId || !userExerciseId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId and userExerciseId are required',
+      });
+    }
+
+    const userExercise = await UserExercise.findById(userExerciseId);
+    if (!userExercise) {
+      return res.status(404).json({
+        success: false,
+        message: 'User exercise not found',
+      });
+    }
+
+    // Get today's date range
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const endOfToday = new Date();
+    endOfToday.setUTCHours(23, 59, 59, 999);
+
+    // Fetch today's sets
+    const todaysSets = await Set.find({
+      userId,
+      userExerciseId,
+      date: { $gte: startOfToday, $lte: endOfToday },
+    });
+
+    // Fetch the most recent previous sets (excluding today)
+    const previousSet = await Set.find({
+      userId,
+      userExerciseId,
+      date: { $lt: startOfToday },
+    })
+      .sort({ date: -1 })
+      .limit(1);
+
+    if (!todaysSets.length || !previousSet.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Both today's and previous workout data required for comparison",
+      });
+    }
+
+    const previousDate = previousSet[0].date;
+
+    // Get all sets from that previous date
+    const startOfPrev = new Date(previousDate);
+    startOfPrev.setUTCHours(0, 0, 0, 0);
+
+    const endOfPrev = new Date(previousDate);
+    endOfPrev.setUTCHours(23, 59, 59, 999);
+
+    const previousSets = await Set.find({
+      userId,
+      userExerciseId,
+      date: { $gte: startOfPrev, $lte: endOfPrev },
+    });
+
+    // Helper to calculate metrics
+    const calculateMetrics = (sets) => {
+      let totalSets = sets.length;
+      let totalReps = 0;
+      let totalVolume = 0; // weight * reps
+      let totalWeight = 0;
+
+      sets.forEach(set => {
+        totalReps += set.reps;
+        totalVolume += set.reps * set.weight;
+        totalWeight += set.weight;
+      });
+
+      const avgKgPerRep = totalReps ? totalVolume / totalReps : 0;
+
+      return { totalSets, totalReps, totalVolume, avgKgPerRep };
+    };
+
+    const todayMetrics = calculateMetrics(todaysSets);
+    const prevMetrics = calculateMetrics(previousSets);
+
+    const getPercentageDiff = (today, prev) => {
+      if (prev === 0) return today === 0 ? 0 : 100;
+      return ((today - prev) / prev) * 100;
+    };
+
+    const comparison = {
+      sets: {
+        today: todayMetrics.totalSets,
+        previous: prevMetrics.totalSets,
+        changePercent: getPercentageDiff(todayMetrics.totalSets, prevMetrics.totalSets).toFixed(2)
+      },
+      reps: {
+        today: todayMetrics.totalReps,
+        previous: prevMetrics.totalReps,
+        changePercent: getPercentageDiff(todayMetrics.totalReps, prevMetrics.totalReps).toFixed(2)
+      },
+      volume: {
+        today: todayMetrics.totalVolume,
+        previous: prevMetrics.totalVolume,
+        changePercent: getPercentageDiff(todayMetrics.totalVolume, prevMetrics.totalVolume).toFixed(2)
+      },
+      kgPerRep: {
+        today: todayMetrics.avgKgPerRep.toFixed(2),
+        previous: prevMetrics.avgKgPerRep.toFixed(2),
+        changePercent: getPercentageDiff(todayMetrics.avgKgPerRep, prevMetrics.avgKgPerRep).toFixed(2)
+      }
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: 'Workout comparison fetched successfully',
+      data: comparison
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error during workout comparison',
+      error: error.message
+    });
+  }
+};
+
+
+
 
 
 
@@ -347,7 +645,7 @@ exports.updateSet = async (req, res) => {
       });
     }
 
-    // Validate if any of the fields are provided to update
+    // Validate if at least one field is provided
     if (![reps, weight, notes, date].some(Boolean)) {
       return res.status(400).json({
         success: false,
@@ -355,18 +653,38 @@ exports.updateSet = async (req, res) => {
       });
     }
 
-    // Validate `date` if it's provided, for proper format (ISO date)
-    if (date && isNaN(Date.parse(date))) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid date format',
-      });
+    // Validate date format and range (within last 2 months)
+    if (date) {
+      const parsedDate = new Date(date);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid date format',
+        });
+      }
+
+      const twoMonthsAgo = new Date();
+      twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+
+      if (parsedDate < twoMonthsAgo) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date must be within the last 2 months',
+        });
+      }
     }
 
-    // Attempt to find and update the set
+    // Build the update object dynamically
+    const updateData = {};
+    if (reps !== undefined) updateData.reps = reps;
+    if (weight !== undefined) updateData.weight = weight;
+    if (notes !== undefined) updateData.notes = notes;
+    if (date !== undefined) updateData.date = date;
+
+    // Find and update the set
     const updatedSet = await Set.findByIdAndUpdate(
       setId,
-      { reps, weight, notes, date }, // Fields to update
+      updateData,
       { new: true, runValidators: true }
     );
 
@@ -378,7 +696,7 @@ exports.updateSet = async (req, res) => {
       });
     }
 
-    // Return the updated set in the response
+    // Return success response
     return res.status(200).json({
       success: true,
       message: 'Set updated successfully',
@@ -397,13 +715,11 @@ exports.updateSet = async (req, res) => {
 
 
 
-
-
 //   Get all sets for a specific date
 exports.getSetsByDate = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { date } = req.query;
+    const userId = req.user.id;
+    const { date } = req.body;
     if (!date) {
         return res.status(400).json({
             success: false,
@@ -453,6 +769,7 @@ exports.getSetsByDate = async (req, res) => {
 
 
 
+// not in considerationn
 
 
 // Helper to get ISO week number from a date
