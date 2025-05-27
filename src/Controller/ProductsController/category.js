@@ -2,60 +2,65 @@ const Category = require('../../Model/ProductsModel/category');
 
 
 exports.createCategory = async (req, res) => {
+    try {
+        const { name } = req.body;
+        const user = req.user;
 
- try {
-    const { name } = req.body;
-    const user = req.user;
+        // Authorization check
+        if (!user || user.role !== 'superadmin') {
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to create a category",
+            });
+        }
 
- 
-    if(!user || user.role !== 'superadmin') {
-        return res.status(403).json({
+        // Check if name is provided
+        if (!name || typeof name !== 'string' || !name.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid category name is required",
+            });
+        }
+
+        const trimmedName = name.trim().toLowerCase();
+
+        // Validate against allowed enum values
+        const allowedCategories = ['suppliment', 'clothes', 'accessories'];
+        if (!allowedCategories.includes(trimmedName)) {
+            return res.status(400).json({
+                success: false,
+                message: `Category must be one of the following: ${allowedCategories.join(', ')}`,
+            });
+        }
+
+        // Check for duplicate
+        const alreadyExists = await Category.findOne({ name: trimmedName });
+        if (alreadyExists) {
+            return res.status(400).json({
+                success: false,
+                message: "Category already exists",
+            });
+        }
+
+        // Create and save
+        const newCategory = new Category({ name: trimmedName });
+        await newCategory.save();
+
+        return res.status(201).json({
+            success: true,
+            message: "Category created successfully",
+            category: newCategory,
+        });
+
+    } catch (error) {
+        return res.status(500).json({
             success: false,
-            message: "You are not authorized to create a category",
+            message: "Error creating category",
+            error: error.message,
         });
     }
+};
 
-    if (!name) {
-        return res.status(400).json({
-            success: false,
-            message: "Category name is required",
-        });
-    }
-    
-   const alreadyExists = await Category.findOne({name})
-
-   if(alreadyExists) {
-    return res.status(400).json({
-        success: false,
-        message: "Category already exists",
-    });
-   }
-
-
-    const newCategory = new Category({
-        name,
-    });
-
-    await newCategory.save();
-
-    return res.status(201).json({
-        success: true,
-        message: "Category created successfully",
-        category: newCategory,
-    });
-    
- } catch (error) {
-
-    return res.status(500).json({
-        success: false,
-        message: "Error creating category",
-        error: error.message,
-    });
-    
- }
-
-
-}
 
 
 

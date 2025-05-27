@@ -4,6 +4,8 @@ const route = express.Router();
 // ✅ Controllers
 const {
   createProduct,
+  uploadProductImages,
+ updateSpecificProductImage,
   getAllProducts,
   getSingleProduct,
   deleteProduct,
@@ -36,11 +38,26 @@ const {
   isUser,
 } = require("../../Middleware/userAuth");
 
+const uploadProductImage = require("../../Middleware/productImageUpload")
+const uploadSingleImage = require("../../Middleware/singleImageUploadProduct");
+
+
+
+
+
 // ======================= Product Routes =======================
 route.post("/products", authentication, isSeller, createProduct);         // Only sellers
 route.get("/products", authentication, getAllProducts);                   // All users
 route.get("/products/:id", authentication, getSingleProduct);             // All users
-route.delete("/products/:id", authentication, isSuperAdmin, deleteProduct); // Only super admin
+route.delete("/products/:id", authentication, isSeller, deleteProduct); // Only super admin
+route.post("/:productId",authentication,isSeller, uploadProductImage, uploadProductImages);
+route.put("/:productId",authentication,isSeller,uploadProductImage, updateSpecificProductImage); // Update product images
+
+
+
+
+
+
 
 // ======================= Category Routes =======================
 route.post("/categories", authentication, isSuperAdmin, createCategory);  // Only super admin

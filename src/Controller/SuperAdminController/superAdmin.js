@@ -56,6 +56,58 @@ exports.createAdmin = async (req, res) => {
   }
 };
 
+
+// create Seller
+exports.createSeller = async (req, res) => {
+  try {
+    const { name, phone, email, password } = req.body;
+
+    // Check if phone is already registered
+    const existingUser = await User.findOne({ phone });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Phone already registered' });
+    }
+
+    // Check if email is already registered
+    const existingEmail = await UserAdditionalInfo.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({ message: 'Email already registered' });
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create User document with seller role
+    const user = new User({
+      phone,
+      password: hashedPassword,
+      role: 'seller'
+    });
+    await user.save();
+
+    // Create Additional Info
+    const additionalInfo = new UserAdditionalInfo({
+      name,
+      userId: user._id,
+      email
+    });
+    await additionalInfo.save();
+
+    // Link additional info to user
+    user.additionalInfo = additionalInfo._id;
+    await user.save();
+
+    res.status(201).json({
+      message: 'Seller created successfully',
+      seller: { user, additionalInfo }
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+
 // Create Coach
 exports.createCoach = async (req, res) => {
   try {
@@ -110,6 +162,18 @@ exports.getAllUsers = async (req, res) => {
   try {
     // Populate additionalInfo so you can view email and name
     const users = await User.find({}, 'phone role createdAt')
+      .populate('additionalInfo', 'name email');
+    res.status(200).json({ users });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching users', error: err.message });
+  }
+};
+
+
+exports.getOfficals = async (req, res) => {
+  try {
+    // Populate additionalInfo so you can view email and name
+    const users = await User.find({"role":{$in:['admin','coach']}}, 'phone role createdAt')
       .populate('additionalInfo', 'name email');
     res.status(200).json({ users });
   } catch (err) {
@@ -189,5 +253,3 @@ exports.getAllInvoices = async (req, res) => {
 };
 
 
-
-// get all admin coaches and seller list

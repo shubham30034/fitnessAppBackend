@@ -248,10 +248,9 @@ exports.regenerateRefreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    const {token:accessToken} = req.headers
+    const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
+   const accessToken = token
 
-    console.log("refreshToken",refreshToken)
-  
 
     if (!refreshToken || !accessToken) {
       return res.status(400).json({

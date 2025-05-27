@@ -16,10 +16,6 @@ const productSchema = new mongoose.Schema({
         required: true,
         min: 0
     },
-    category: {
-        type: String,
-        trim: true
-    },
     sellerId:{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -29,26 +25,31 @@ const productSchema = new mongoose.Schema({
         type: String,
         required: true
     }],
-    // users who interested in this product(buy,like, etc)
     users:[{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
     }],
     quantity: {
-    type: Number,
-    default: 1,
-    min: 0
-},
-// checking if the product is in stock
-isActive: {
-    type: Boolean,
-    default: true
-},
-category: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Category',
-    required: true
-}
-},{ timestamps: true });
+        type: Number,
+        default: 1,
+        min: 0
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    category: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+        required: true
+    }
+}, { 
+    timestamps: true
+});
+
+// Add a validator on productImages array length
+productSchema.path('productImages').validate(function(images) {
+    return images.length <= 3;
+}, 'Maximum 3 images are allowed per product.');
 
 module.exports = mongoose.model('Product', productSchema);

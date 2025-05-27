@@ -4,7 +4,7 @@ const BlacklistedToken = require('../Model/userModel/blackListedToken');
 
 exports.authentication = async (req, res, next) => {
   try {
-    const { token } = req.headers; // Extract token from Authorization header
+    const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Unauthorized: No token provided' });
@@ -21,9 +21,8 @@ exports.authentication = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
     }
 
-    req.user = decoded; // Attach user data to request object
+    req.user = decoded;
     next();
-
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
@@ -44,7 +43,7 @@ exports.isAdmin = (req, res, next) => {
 exports.isSuperAdmin = (req, res, next) => {
   if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized: No user data' });
 
-  if (req.user.role !== 'superAdmin') {
+  if (req.user.role !== 'superadmin') {
     return res.status(403).json({ success: false, message: 'Forbidden: SuperAdmins only' });
   }
   next();

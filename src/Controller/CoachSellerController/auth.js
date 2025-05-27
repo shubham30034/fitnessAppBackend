@@ -1,8 +1,9 @@
 const User = require('../../Model/userModel/userModel');
 const bcrypt = require('bcrypt');
-const generateToken = require('../../Utils/Jwt');
+const {generateToken} = require('../../Utils/Jwt');
 const RefreshToken = require('../../Model/userModel/refreshToken');
 const jwt = require('jsonwebtoken');
+const BlacklistedToken = require('../../Model/userModel/blackListedToken');
 
 // Coach & Seller Login
 exports.loginWithPassword = async (req, res) => {
@@ -17,12 +18,12 @@ exports.loginWithPassword = async (req, res) => {
     }
 
     const user = await User.findOne({ phone }).populate('additionalInfo');
-
-    if (!user || !['coach', 'seller'].includes(user.role)) {
-      return res.status(404).json({
-        success: false,
-        message: 'Coach or Seller not found',
-      });
+  
+    if(!user){
+      return res.status(400).json({
+        success:false,
+        message:"unable to find offical"
+      })
     }
 
     if (!user.password) {
@@ -41,7 +42,7 @@ exports.loginWithPassword = async (req, res) => {
     }
 
     const payload = { id: user._id, role: user.role };
-    const { accessToken, refreshToken } = generateToken(payload);
+    const { accessToken, refreshToken } = await generateToken(payload);
 
     await RefreshToken.create({
       userId: user._id,
@@ -77,15 +78,47 @@ exports.loginWithPassword = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) {
-      return res.status(400).json({ success: false, message: 'Refresh token is required' });
+   const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
+   const accessToken = token
+
+
+    console.log("refreshToken", refreshToken);
+
+    if (!refreshToken || !accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token and access token are required',
+      });
     }
 
-    await RefreshToken.deleteOne({ token: refreshToken });
-    res.status(200).json({ success: true, message: 'Logged out successfully' });
+    // ❌ Delete refresh token from DB
+    const deleted = await RefreshToken.deleteOne({ token: refreshToken });
 
+    console.log(deleted, "deleted");
+
+    if (deleted.deletedCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired refresh token',
+      });
+    }
+
+    // 🛑 Decode the access token and store in blacklist
+    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
+    const expiresAt = new Date(decoded.exp * 1000);
+
+    await BlacklistedToken.create({ token: accessToken, expiresAt });
+
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully, token blacklisted',
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error during logout', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Error during logout',
+      error: error.message,
+    });
   }
 };
 
@@ -128,7 +161,7 @@ exports.regenerateRefreshToken = async (req, res) => {
 // Get Current User
 exports.getCurrentUser = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
 
     const user = await User.findById(userId).populate('additionalInfo');
     if (!user) {

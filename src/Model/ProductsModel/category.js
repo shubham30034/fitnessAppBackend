@@ -7,7 +7,7 @@ const categorySchema = new mongoose.Schema({
         required: true,
         unique: true,
         trim: true,
-        enum:['suppliment','clothes','accessories','gears','others']
+        enum:['suppliment','clothes','accessories']
     },
     subcategories: [{
         type: mongoose.Schema.Types.ObjectId,
