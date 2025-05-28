@@ -2,25 +2,24 @@ const Product = require('../../Model/ProductsModel/product');
 const Order = require('../../Model/ProductsModel/orderSchema');
 const { instance } = require("../../Config/razerpay");
 const crypto = require("crypto");
+const {buyProductValidation} = require("../../validator/productValidation")
 
 
 exports.buyProduct = async (req, res) => {
   try {
-    // ✅ Get the user's ID from the authenticated token (middleware should add it to req.user)
-    const userId = req.user._id;
-
-    // ✅ Extract product details from the request body
+    const userId = req.user.id;
     const { productId, quantity, address } = req.body;
 
-    // ✅ Validate request body
-    if (!productId || !quantity || !address) {
+    // Validate input
+    const { error } = buyProductValidation({ productId, quantity, address });
+    if (error) {
       return res.status(400).json({
         success: false,
-        message: "Product ID, quantity, and address are required",
+        message: error.details[0].message,
       });
     }
 
-    // ✅ Check if the product exists
+    // Check if product exists
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -29,7 +28,7 @@ exports.buyProduct = async (req, res) => {
       });
     }
 
-    // ✅ Check if enough stock is available
+    // Check stock
     if (product.quantity < quantity) {
       return res.status(400).json({
         success: false,
@@ -37,7 +36,7 @@ exports.buyProduct = async (req, res) => {
       });
     }
 
-    // ✅ Check if product is active
+    // Check if product is active
     if (product.isActive === false) {
       return res.status(400).json({
         success: false,
@@ -45,47 +44,37 @@ exports.buyProduct = async (req, res) => {
       });
     }
 
-    // ✅ Calculate order amount and define currency
+    // Calculate order amount and create Razorpay order
     const amount = product.price * quantity;
     const currency = "INR";
-
-    // ✅ Create Razorpay order options
     const options = {
-      amount: amount * 100, // Razorpay takes amount in paise (1 INR = 100 paise)
+      amount: amount * 100,
       currency,
-      receipt: `order_rcptid_${Date.now()}`, // Unique receipt ID
-      notes: {
-        productId,
-        userId,
-      },
+      receipt: `order_rcptid_${Date.now()}`,
+      notes: { productId, userId },
     };
 
-    // ✅ Create order in Razorpay
     const paymentResponse = await instance.orders.create(options);
 
-    // ✅ Create order in your database
+    // Save order in DB
     const newOrder = new Order({
       userId,
       productId,
       quantity,
       totalPrice: amount,
       address,
-      status: "Pending",          // Will update to 'Confirmed' on payment success
-      paymentStatus: "Pending",   // Will update to 'Paid' after verification
+      status: "Pending",
+      paymentStatus: "Pending",
     });
-
     await newOrder.save();
 
-    // ✅ Send response to frontend with order details and Razorpay order
     res.status(201).json({
       success: true,
       message: "Order created successfully",
       order: newOrder,
       razorpayOrder: paymentResponse,
     });
-
   } catch (error) {
-    // ❌ Handle any unexpected errors
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -93,8 +82,6 @@ exports.buyProduct = async (req, res) => {
     });
   }
 };
-
-
 
 
 exports.verifySignature = async (req, res) => {
@@ -164,6 +151,13 @@ exports.verifySignature = async (req, res) => {
 exports.getAllOrdersOfUser = async (req, res) => {
    try {
     const { userId } = req.user;
+
+
+if (!userId) {
+  return res.status(401).json({ success: false, message: "Unauthorized: user ID missing" });
+}
+
+
     const orders = await Order.find({ userId }).populate("productId");
     if (!orders || orders.length === 0) {
       return res.status(404).json({
@@ -192,8 +186,19 @@ exports.getAllOrdersOfUser = async (req, res) => {
 
 exports.getInvoice = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
     const { orderId } = req.params;
+
+    if (!userId) {
+  return res.status(401).json({ success: false, message: "Unauthorized: user ID missing" });
+}
+
+if(!orderId){
+  return res.status(400).json({
+    success:false,
+    message:"order id is required"
+  })
+}
 
     // ✅ Find the order and populate product details
     const order = await Order.findOne({ _id: orderId, userId }).populate('productId');

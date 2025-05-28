@@ -1,29 +1,21 @@
 const BMICategory = require("../../Model/bmiCategorySchema/bmiCategorySchema");
+const {calculateBMIValidation} = require("../../validator/bmiValidation")
 
 exports.calculateBMI = async (req, res) => {
   const { weight, height } = req.body;
 
-  // Basic presence check
-  if (weight === undefined || height === undefined) {
-    return res.status(400).json({ error: "Weight and height are required" });
+  const { error } = calculateBMIValidation({ weight, height });
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: error.details.map(e => e.message),
+    });
   }
 
-  // Type and range validation
+  // Convert to numbers after validation
   const weightNum = Number(weight);
   const heightNum = Number(height);
-
-  if (isNaN(weightNum) || isNaN(heightNum)) {
-    return res.status(400).json({ error: "Weight and height must be numbers" });
-  }
-
-  if (weightNum <= 0 || heightNum <= 0) {
-    return res.status(400).json({ error: "Weight and height must be positive values" });
-  }
-
-  // Optional: add reasonable limits
-  if (weightNum > 500 || heightNum > 300) {
-    return res.status(400).json({ error: "Weight or height values are unrealistically high" });
-  }
 
   const heightM = heightNum / 100;
   const bmi = weightNum / (heightM * heightM);

@@ -2,10 +2,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+
 const productStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const productId = req.params.productId;
-    const uploadPath = path.join(__dirname, `../uploads/products/${productId}`);
+    const uploadPath = path.join(__dirname, `../../uploads/products/${productId}`);
 
     // Create folder if it doesn't exist
     if (!fs.existsSync(uploadPath)) {

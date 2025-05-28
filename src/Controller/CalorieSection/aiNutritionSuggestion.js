@@ -1,6 +1,7 @@
 const AiDiet = require("../../Model/calorieModel/aiNutrition");
 const fetch = require("node-fetch"); // npm install node-fetch@2
 const openRouter = require("../../Utils/aiApi")
+const {aiDietPlanValidation,updateWeekValidation,updateDayValidation} = require("../../validator/calorieValidation")
 
 require("dotenv").config()
 
@@ -67,34 +68,51 @@ async function getDietPlanFromAI(userData) {
   }
 }
 
-
+// ai Diet plan controller
 exports.aiDietPlan = async (req, res) => {
   try {
     const { id: userId } = req.user || {};
+
+    // Validate request body with Joi
+    const { error, value } = aiDietPlanValidation(req.body);
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: error.details.map(e => e.message),
+      });
+    }
+
+    // Destructure validated data
     const {
       age, gender, heightCm, weightKg,
       goal, dietaryPreferences = [],
       medicalConditions = [], numWeeks = 1,
-    } = req.body;
+    } = value;
 
-    if (!userId || !age || !gender || !heightCm || !weightKg || !goal)
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated" });
+    }
 
-    if (numWeeks < 1 || numWeeks > 4)
-      return res.status(400).json({ success: false, message: "numWeeks must be between 1 and 4" });
-
-    if (await AiDiet.findOne({ userId }))
+    // Check if diet plan already exists for this user
+    if (await AiDiet.findOne({ userId })) {
       return res.status(409).json({ success: false, message: "AI diet plan already exists for this user" });
+    }
 
+    // Get raw diet plan from AI service
     const rawPlan = await getDietPlanFromAI({
       age, gender, heightCm, weightKg,
       goal, dietaryPreferences, medicalConditions, numWeeks
     });
 
+    // Inject dates into the plan
     const datedPlan = injectDates(rawPlan);
-    if (!Array.isArray(datedPlan) || datedPlan.length !== numWeeks * 7)
-      return res.status(400).json({ success: false, message: `Expected ${numWeeks * 7} days` });
 
+    if (!Array.isArray(datedPlan) || datedPlan.length !== numWeeks * 7) {
+      return res.status(400).json({ success: false, message: `Expected ${numWeeks * 7} days in diet plan` });
+    }
+
+    // Format weekly plans
     const weeklyPlans = Array.from({ length: numWeeks }, (_, w) => {
       const days = datedPlan.slice(w * 7, (w + 1) * 7).map(day => {
         const totalCalories = day.meals.reduce(
@@ -115,6 +133,7 @@ exports.aiDietPlan = async (req, res) => {
       };
     });
 
+    // Save diet plan to database
     const newDiet = await AiDiet.create({
       userId,
       age, gender, heightCm, weightKg,
@@ -123,13 +142,14 @@ exports.aiDietPlan = async (req, res) => {
       createdAt: new Date()
     });
 
+    // Respond with success
     res.status(201).json({ success: true, message: "AI diet plan created", data: newDiet });
+
   } catch (err) {
     console.error("Diet Plan Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 
 
@@ -184,8 +204,13 @@ exports.updateWeekWithAI = async (req, res) => {
     const userId = req.user?.id;
     const { weekNumber, userRequest } = req.body;
 
-    if (!userId || !weekNumber || !userRequest) {
-      return res.status(400).json({ success: false, message: "Missing required fields: userId, weekNumber, userRequest" });
+      const { error } = updateWeekValidation({ weekNumber, userRequest });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: error.details.map(e => e.message),
+      });
     }
 
     const userDiet = await AiDiet.findOne({ userId });
@@ -215,10 +240,14 @@ exports.updateDayWithAI = async (req, res) => {
     const userId = req.user?.id;
     const { weekNumber, date, userRequest } = req.body;
 
-    if (!userId || !weekNumber || !date || !userRequest) {
-      return res.status(400).json({ success: false, message: "Missing required fields: userId, weekNumber, date, userRequest" });
+   const { error } = updateDayValidation({ weekNumber, date, userRequest });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: error.details.map(e => e.message),
+      });
     }
-
     const userDiet = await AiDiet.findOne({ userId });
     if (!userDiet) return res.status(404).json({ success: false, message: "Diet plan not found" });
 
@@ -243,8 +272,6 @@ exports.updateDayWithAI = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
-
 
 
 

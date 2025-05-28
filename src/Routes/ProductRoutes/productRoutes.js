@@ -9,6 +9,7 @@ const {
   getAllProducts,
   getSingleProduct,
   deleteProduct,
+  updateProduct
 } = require("../../Controller/ProductsController/createProduct");
 
 const {
@@ -39,7 +40,7 @@ const {
 } = require("../../Middleware/userAuth");
 
 const uploadProductImage = require("../../Middleware/productImageUpload")
-const uploadSingleImage = require("../../Middleware/singleImageUploadProduct");
+const uploadProfileImage = require("../../Middleware/uploadProfileUser");
 
 
 
@@ -47,6 +48,7 @@ const uploadSingleImage = require("../../Middleware/singleImageUploadProduct");
 
 // ======================= Product Routes =======================
 route.post("/products", authentication, isSeller, createProduct);         // Only sellers
+route.put("/products/:id", authentication, isSeller, updateProduct);     // Only sellers
 route.get("/products", authentication, getAllProducts);                   // All users
 route.get("/products/:id", authentication, getSingleProduct);             // All users
 route.delete("/products/:id", authentication, isSeller, deleteProduct); // Only super admin

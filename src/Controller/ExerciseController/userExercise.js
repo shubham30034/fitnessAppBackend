@@ -256,6 +256,13 @@ exports.getRecordedSets = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    if(!userId){
+      return res.status(400).json({
+        success:false,
+        message:"unable to find userId"
+      })
+    }
+
     
     const sets = await Set.find({ userId }).populate({
       path: 'userExerciseId', // 'ref' should be 'path' for populating with nested data
@@ -293,8 +300,6 @@ exports.getExerciseRepsToday = async (req, res) => {
   try {
     const userId = req.user.id;
     const { userExerciseId } = req.body;
-
-
 
     if (!userId || !userExerciseId) {
       return res.status(400).json({
@@ -628,9 +633,6 @@ exports.compareTodayWithPreviousWorkout = async (req, res) => {
 
 
 
-
-
-
 // Update a set
 exports.updateSet = async (req, res) => {
   try {
@@ -714,7 +716,6 @@ exports.updateSet = async (req, res) => {
 };
 
 
-
 //   Get all sets for a specific date
 exports.getSetsByDate = async (req, res) => {
   try {
@@ -766,8 +767,6 @@ exports.getSetsByDate = async (req, res) => {
     res.status(500).json({ error: 'Failed to get sets by date' });
   }
 };
-
-
 
 // not in considerationn
 

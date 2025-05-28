@@ -1,6 +1,7 @@
 const User = require('../../Model/userModel/userModel');
 const UserAdditionalInfo = require('../../Model/userModel/additionalInfo');
 const bcrypt = require('bcryptjs');
+const {createAdminValidation} = require("../../validator/superAdminValidator")
 
 
 // validation required for all controllers
@@ -10,6 +11,15 @@ const bcrypt = require('bcryptjs');
 exports.createAdmin = async (req, res) => {
   try {
     const { name, phone, email, password } = req.body;
+
+      const { error } = createAdminValidation({ name, phone, email, password });
+     if (error) {
+      return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: error.details.map(e => e.message),
+     });
+  }
 
     // Check if phone is already registered in User collection
     const existingUser = await User.findOne({ phone });
@@ -62,6 +72,16 @@ exports.createSeller = async (req, res) => {
   try {
     const { name, phone, email, password } = req.body;
 
+
+      const { error } = createAdminValidation({ name, phone, email, password });
+    if (error) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: error.details.map(e => e.message),
+    });
+  }
+
     // Check if phone is already registered
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
@@ -112,6 +132,15 @@ exports.createSeller = async (req, res) => {
 exports.createCoach = async (req, res) => {
   try {
     const { name, phone, email, password } = req.body;
+
+      const { error } = createAdminValidation({ name, phone, email, password });
+      if (error) {
+      return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: error.details.map(e => e.message),
+    });
+    }
 
     // Check phone for duplicate in User collection
     const existingUser = await User.findOne({ phone });

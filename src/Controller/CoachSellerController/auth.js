@@ -4,19 +4,23 @@ const {generateToken} = require('../../Utils/Jwt');
 const RefreshToken = require('../../Model/userModel/refreshToken');
 const jwt = require('jsonwebtoken');
 const BlacklistedToken = require('../../Model/userModel/blackListedToken');
+const {loginValidation} = require("../../validator/coachSellerValidation")
 
 // Coach & Seller Login
 exports.loginWithPassword = async (req, res) => {
   try {
     const { phone, password } = req.body;
 
-    if (!phone || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Phone number and password are required',
-      });
-    }
 
+    const { error } = loginValidation({ phone, password });
+    if (error) {
+    return res.status(400).json({
+     success: false,
+     message: 'Validation failed',
+    errors: error.details.map(e => e.message),
+     });
+   }
+    
     const user = await User.findOne({ phone }).populate('additionalInfo');
   
     if(!user){

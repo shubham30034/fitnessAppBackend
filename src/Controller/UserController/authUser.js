@@ -6,6 +6,7 @@ const bcrypt = require('bcrypt');
 const Otp = require('../../Model/userModel/otpModel');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const {sendOtpValidation,verifyOtpValidation} = require("../../validator/loginValidation")
 
 const BlacklistedToken = require('../../Model/userModel/blackListedToken');
 require('dotenv').config();
@@ -75,10 +76,18 @@ const sendOtpToUser = async (user, phone) => {
 exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
-    if (!phone) {
-      return res.status(400).json({ success: false, message: 'Phone number is required' });
+
+    // ✅ Step 0: Validate phone
+    const {error} = sendOtpValidation({phone})
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
     }
 
+    // ✅ Step 1: Find or create user
     let user = await User.findOne({ phone }).populate('additionalInfo');
     if (!user) {
       user = await User.create({ phone, role: 'user' });
@@ -91,10 +100,10 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
-    // ✅ Step 1: Check cooldown (60 seconds)
+    // ✅ Step 2: Enforce 60s cooldown
     const recentOtp = await Otp.findOne({
       userId: user._id,
-      createdAt: { $gt: new Date(Date.now() - 60 * 1000) } // last 60 seconds
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) }
     });
 
     if (recentOtp) {
@@ -105,10 +114,10 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
-    // ✅ Step 2: Remove all previous OTPs (optional but clean)
+    // ✅ Step 3: Clean old OTPs
     await Otp.deleteMany({ userId: user._id });
 
-    // ✅ Step 3: Send new OTP
+    // ✅ Step 4: Generate & send OTP
     const otp = await sendOtpToUser(user, phone);
     if (!otp) {
       return res.status(500).json({
@@ -117,10 +126,11 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
+    // ⚠️ Log OTP only in dev mode
     res.status(200).json({
       success: true,
       message: 'OTP sent successfully',
-      otp: otp, // ❗ REMOVE THIS IN PRODUCTION
+      otp, // ❗ remove in production
     });
 
   } catch (error) {
@@ -133,10 +143,26 @@ exports.sendOtp = async (req, res) => {
 };
 
 
+
+
 // Verify OTP
 exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp } = req.body;
+
+   const {error} = verifyOtpValidation({phone,otp})
+
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+
+
+
 
     const user = await User.findOne({ phone }).populate('additionalInfo');
     console.log("User found:", user);
@@ -248,10 +274,13 @@ exports.regenerateRefreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
+
+  
+
     const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
    const accessToken = token
 
-
+  
     if (!refreshToken || !accessToken) {
       return res.status(400).json({
         success: false,
@@ -296,7 +325,15 @@ exports.logout = async (req, res) => {
 exports.getCurrentUser = async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log("User ID from token:", userId);
+
+   if(!userId){
+    return res.status(400).json({
+      success:false,
+      message:"userId is Required"
+    })
+   }
+
+
 
     const user = await User.findById(userId).populate('additionalInfo');
 

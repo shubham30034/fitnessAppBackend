@@ -2,11 +2,21 @@ const AIWorkoutPlan = require("../../Model/fitnessModel/aiWorkoutPlanner");
 const User = require("../../Model/userModel/userModel");
 const fetch = require("node-fetch");
 const openRouter = require("../../Utils/aiApi")
+const {aiWorkoutPlannerValidation} = require("../../validator/workoutValidation")
 
 exports.aiWorkoutPlanner = async (req, res) => {
   try {
     const userId = req.user.id;
     const { goal, fitness_level, total_weeks } = req.body;
+
+
+    const {error} = aiWorkoutPlannerValidation({goal,fitness_level,total_weeks})
+
+    if (error) {
+  return res.status(400).json({ success: false, message: "Validation failed", errors: error.details.map(e => e.message) });
+}
+
+
 
     const days_per_week = 5;
     const total_sessions = total_weeks * days_per_week;

@@ -2,6 +2,7 @@ const axios = require('axios');
 const Exercise = require('../../Model/fitnessModel/exercise');
 const fs = require('fs');
 const path = require('path');
+const{paginationValidation,exerciseFilterValidation} = require("../../validator/workoutValidation")
 
 require('dotenv').config();
 
@@ -47,6 +48,18 @@ exports.getAllExercises = async (req, res) => {
         // Get page and limit from request body (or default values)
         const { page , limit } = req.body;
 
+        const {error} = paginationValidation({page,limit})
+
+        
+         if (error) {
+       return res.status(400).json({
+         status: false,
+        message: "Validation failed",
+       errors: error.details.map(e => e.message),
+       });
+      }
+
+
         // Fetch exercises with pagination
         const allExercises = await Exercise.find({})
             .limit(Number(limit))  // Limit the number of exercises returned
@@ -87,6 +100,18 @@ exports.getExerciseByMuscelAndLevel = async (req, res) => {
     // Get the muscle and level from the request body
     const { muscle, level } = req.body;
 
+
+      const {error} = exerciseFilterValidation({muscle,level})
+
+        
+         if (error) {
+       return res.status(400).json({
+         status: false,
+        message: "Validation failed",
+       errors: error.details.map(e => e.message),
+       });
+      }
+
     // Validate the muscle and level
     if (!muscle || !level) {
       return res.status(400).json({
@@ -119,7 +144,6 @@ exports.getExerciseByMuscelAndLevel = async (req, res) => {
     });
   }
 };
-
 
 
 exports.getExerciseById = async (req, res) => {

@@ -4,8 +4,8 @@ const fs = require('fs');
 
 const singleStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const userId = req.params.userId;
-    const uploadPath = path.join(__dirname, `../uploads/profile/${userId}`);
+    const userId = req.user.id; // Note: req.user.id must exist before multer runs
+    const uploadPath = path.join(__dirname, `../../uploads/profile/${userId}`);
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
@@ -13,7 +13,8 @@ const singleStorage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${Date.now()}-${file.originalname}`);
+    const uniqueName = `${Date.now()}-${file.originalname}`;
+    cb(null, uniqueName);
   }
 });
 
@@ -28,8 +29,8 @@ const uploadSingleImage = multer({
   storage: singleStorage,
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB max
+    fileSize: 5 * 1024 * 1024 // 5MB
   }
-}).single('image'); // 👈 for single file
+}).single('image');
 
 module.exports = uploadSingleImage;

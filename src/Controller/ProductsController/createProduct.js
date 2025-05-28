@@ -4,6 +4,7 @@ const Category = require("../../Model/ProductsModel/category");
 const fs = require('fs');
 const path = require('path');
 const { uploadMultipleImagesToCloudinary } = require("../../Utils/imageUploader");
+const {createProductValidation,updateProductValidation} = require("../../validator/productValidation")
 
 // creatre Profduct
 exports.createProduct = async (req, res) => {
@@ -12,9 +13,11 @@ exports.createProduct = async (req, res) => {
     const sellerId = req.user.id; // Assuming user ID is stored in req.user after authentication
     const { name, description, price, category, quantity} = req.body;
 
-    if (!name || !description || !price || !category || !quantity || !sellerId) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
-    }
+ 
+  const { error } = createProductValidation({ name, description, price, category, quantity, sellerId });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
 
     const categoryExists = await Category.findById(category);
     if (!categoryExists) {
@@ -43,6 +46,56 @@ exports.createProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Error creating product",
+      error: error.message,
+    });
+  }
+};
+
+
+// update existing product
+exports.updateProduct = async (req, res) => {
+  try {
+    const productId = req.params.id;
+    const sellerId = req.user.id; // From authentication middleware
+    const { name, description, price, category, quantity } = req.body;
+
+    // Validate required fields
+   const { error } = updateProductValidation({ productId, name, description, price, category, quantity });
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+
+    // Check if category exists
+    const categoryExists = await Category.findById(category);
+    if (!categoryExists) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+
+    // Find product and check ownership
+    const product = await Product.findOne({ _id: productId, sellerId });
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found or unauthorized" });
+    }
+
+    // Update fields
+    product.name = name;
+    product.description = description;
+    product.price = price;
+    product.category = category;
+    product.quantity = quantity;
+
+    await product.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Product updated successfully",
+      product
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error updating product",
       error: error.message,
     });
   }
@@ -150,7 +203,7 @@ exports.updateSpecificProductImage = async (req, res) => {
     }
 
     // Delete old image file from disk
-    const imageDir = path.join(__dirname, `../../uploads/products/${productId}`);
+    const imageDir = path.join(__dirname, `../../../uploads/products/${productId}`);
     const oldFilePath = path.join(imageDir, product.productImages[idx]);
     if (fs.existsSync(oldFilePath)) {
       fs.unlinkSync(oldFilePath);
@@ -205,6 +258,7 @@ exports.getAllProducts = async (req, res) => {
 exports.getOwnProducts = async (req, res) => {
   try {
     const sellerId = req.user.id; // Set by your authentication middleware
+
 
     // 1. Validate seller ID
     if (!mongoose.Types.ObjectId.isValid(sellerId)) {
@@ -273,13 +327,18 @@ exports.getSingleProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const productId = req.params.id;
-
-    console.log("productId:", productId);
     const sellerId = req.user.id; // Assuming user is authenticated and ID is attached to req.user
 
     // 1. Validate product ID
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
+    }
+
+    if(!sellerId){
+      return res.status(400).json({
+        success:false,
+        message:"unable to find userId"
+      })
     }
 
     // 2. Find the product
