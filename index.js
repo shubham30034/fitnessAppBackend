@@ -23,6 +23,8 @@ const aiWorkoutPlanner = require("./src/Routes/ExerciseRoutes/aiFeatures")
 const calculateBmi = require("./src/Routes/BmiCalulator/bmi")
 const nutritionRoutes = require("./src/Routes/NutirtionRoutes/nutrition")
 const aiNutritionPlanner = require("./src/Routes/NutirtionRoutes/aiNutrition")
+const cartRoutes = require("./src/Routes/ProductRoutes/cart")
+const coachingSessionRoutes = require("./src/Routes/CoachingSessionRoutes/coahingSession")
 
 
 app.use("/api/v1/user", userRoutes)
@@ -35,6 +37,8 @@ app.use("/api/v1/ai-workout",aiWorkoutPlanner)
 app.use("/api/v1/bmi",calculateBmi)
 app.use("/api/v1/nutrition",nutritionRoutes)
 app.use("/api/v1/ai-nutrition",aiNutritionPlanner)
+app.use("/api/v1/cart",cartRoutes)
+app.use("/api/v1/coaching-session", coachingSessionRoutes)
 
 
 

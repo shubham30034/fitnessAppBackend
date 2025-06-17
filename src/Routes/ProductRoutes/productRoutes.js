@@ -12,6 +12,8 @@ const {
   updateProduct
 } = require("../../Controller/ProductsController/createProduct");
 
+const {addToCart} = require("../../Controller/ProductsController/cart")
+
 const {
   createCategory,
   getAllCategories,
@@ -78,5 +80,10 @@ route.get("/orders", authentication, isUser, getAllOrdersOfUser);
 
 // ✅ New: Get invoice for a specific order
 route.get("/invoice/:orderId", authentication, isUser, getInvoice);
+
+
+
+
+
 
 module.exports = route;

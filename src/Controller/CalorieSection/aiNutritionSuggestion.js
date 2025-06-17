@@ -5,19 +5,31 @@ const {aiDietPlanValidation,updateWeekValidation,updateDayValidation} = require(
 
 require("dotenv").config()
 
+
 function buildPrompt({ age, gender, heightCm, weightKg, goal, dietaryPreferences, medicalConditions, numDays }) {
-  return `You are a professional dietitian. Create a JSON array of ${numDays} daily diet plans for a person with the following profile:
-- Age: ${age}, Gender: ${gender}
-- Height: ${heightCm} cm, Weight: ${weightKg} kg
-- Goal: ${goal}
-- Dietary Preferences: ${dietaryPreferences.length ? dietaryPreferences.join(', ') : 'none'}
-- Medical Conditions: ${medicalConditions.length ? medicalConditions.join(', ') : 'none'}
+  return `You are a diet expert. Create a JSON array of ${numDays} daily Indian diet plans for a person with the following profile:
 
-Each day's plan must include 4 meals: breakfast, lunch, dinner, snack.
-**Use typical Indian foods and dishes for all meals, considering common Indian dietary habits.**
-Each meal should list items with name, quantity (with units), and approximate calories.
+Age: ${age}, Gender: ${gender}
+Height: ${heightCm} cm, Weight: ${weightKg} kg
+Goal: ${goal}
+Dietary Preferences: ${dietaryPreferences.length ? dietaryPreferences.join(', ') : 'none'}
+Medical Conditions: ${medicalConditions.length ? medicalConditions.join(', ') : 'none'}
 
-Respond ONLY with valid JSON in the format:
+Each day should include 4 meals: breakfast, lunch, dinner, and snack.
+Each meal must be an object like:
+{
+  "type": "mealType",
+  "items": [
+    { "name": "food name", "quantity": "100g / 1 cup / 2 pcs", "calories": 123 }
+  ]
+}
+
+Each day should be:
+{
+  "meals": [ ... ] // four meals
+}
+
+Return ONLY valid JSON in this format:
 [
   {
     "meals": [
@@ -26,10 +38,18 @@ Respond ONLY with valid JSON in the format:
         "items": [
           { "name": "poha", "quantity": "100g", "calories": 250 }
         ]
-      }
+      },
+      ...
     ]
-  }
-]`.trim();
+  },
+  ...
+]
+
+Important:
+- Do NOT include comments, explanations, or markdown.
+- Do NOT wrap in \`\`\`json or code blocks.
+- Ensure proper array structure and comma placement.
+- Key must be "items" (not "item" or anything else).`.trim();
 }
 
 
@@ -42,14 +62,22 @@ function injectDates(dietPlan) {
   });
 }
 
+// utils/jsonSanitizer.js
+
 function sanitizeJSON(json) {
-  return json.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  return json
+    .replace(/^```(?:json)?\s*|\s*```$/g, '') // remove code fences
+    .replace(/\/\/.*$/gm, '')                 // remove JS-style comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')         // remove block comments
+    .replace(/\bitem\b/g, 'items')            // fix incorrect key
+    .replace(/,\s*([\]}])/g, '$1')            // remove trailing commas
+    .trim();
 }
+
+// controller/aiDietPlanController.js
 
 async function getDietPlanFromAI(userData) {
   const prompt = buildPrompt({ ...userData, numDays: userData.numWeeks * 7 });
-
-  
 
   const { choices } = await openRouter(prompt);
   const aiContent = choices?.[0]?.message?.content;
@@ -61,6 +89,10 @@ async function getDietPlanFromAI(userData) {
   try {
     const sanitized = sanitizeJSON(aiContent);
     console.log("Sanitized JSON:", sanitized);
+
+    // Ensure it's a JSON array
+    if (!sanitized.startsWith("[")) throw new Error("AI response must start with a JSON array.");
+
     return JSON.parse(sanitized);
   } catch (err) {
     console.error("Failed to parse AI response:", aiContent);
@@ -73,7 +105,6 @@ exports.aiDietPlan = async (req, res) => {
   try {
     const { id: userId } = req.user || {};
 
-    // Validate request body with Joi
     const { error, value } = aiDietPlanValidation(req.body);
     if (error) {
       return res.status(400).json({
@@ -83,7 +114,6 @@ exports.aiDietPlan = async (req, res) => {
       });
     }
 
-    // Destructure validated data
     const {
       age, gender, heightCm, weightKg,
       goal, dietaryPreferences = [],
@@ -94,25 +124,21 @@ exports.aiDietPlan = async (req, res) => {
       return res.status(401).json({ success: false, message: "User not authenticated" });
     }
 
-    // Check if diet plan already exists for this user
     if (await AiDiet.findOne({ userId })) {
       return res.status(409).json({ success: false, message: "AI diet plan already exists for this user" });
     }
 
-    // Get raw diet plan from AI service
     const rawPlan = await getDietPlanFromAI({
       age, gender, heightCm, weightKg,
       goal, dietaryPreferences, medicalConditions, numWeeks
     });
 
-    // Inject dates into the plan
     const datedPlan = injectDates(rawPlan);
 
     if (!Array.isArray(datedPlan) || datedPlan.length !== numWeeks * 7) {
       return res.status(400).json({ success: false, message: `Expected ${numWeeks * 7} days in diet plan` });
     }
 
-    // Format weekly plans
     const weeklyPlans = Array.from({ length: numWeeks }, (_, w) => {
       const days = datedPlan.slice(w * 7, (w + 1) * 7).map(day => {
         const totalCalories = day.meals.reduce(
@@ -133,7 +159,6 @@ exports.aiDietPlan = async (req, res) => {
       };
     });
 
-    // Save diet plan to database
     const newDiet = await AiDiet.create({
       userId,
       age, gender, heightCm, weightKg,
@@ -142,7 +167,6 @@ exports.aiDietPlan = async (req, res) => {
       createdAt: new Date()
     });
 
-    // Respond with success
     res.status(201).json({ success: true, message: "AI diet plan created", data: newDiet });
 
   } catch (err) {
@@ -150,7 +174,6 @@ exports.aiDietPlan = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 
 // Helper: create prompt for updating diet plan (week or day)

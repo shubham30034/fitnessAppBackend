@@ -2,184 +2,57 @@ const User = require('../../Model/userModel/userModel');
 const UserAdditionalInfo = require('../../Model/userModel/additionalInfo');
 const bcrypt = require('bcryptjs');
 const {createAdminValidation} = require("../../validator/superAdminValidator")
+const CoachSchedule = require('../../Model/paidSessionModel/coachSheduleSchema');
 
 
 // validation required for all controllers
 
 
-// Create Admin
-exports.createAdmin = async (req, res) => {
+// Create officals
+exports.createUser = async (req, res) => {
   try {
-    const { name, phone, email, password } = req.body;
+    const { name, phone, email, password, role } = req.body;
 
-      const { error } = createAdminValidation({ name, phone, email, password });
-     if (error) {
-      return res.status(400).json({
-      success: false,
-      message: 'Validation failed',
-      errors: error.details.map(e => e.message),
-     });
-  }
-
-    // Check if phone is already registered in User collection
-    const existingUser = await User.findOne({ phone });
-    if (existingUser) {
-      return res.status(400).json({ message: 'Phone already registered' });
+    // Only allow valid roles
+    const validRoles = ['admin', 'seller', 'coach'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Invalid role' });
     }
 
-    // Check if email is already registered in UserAdditionalInfo collection
-    const existingEmail = await UserAdditionalInfo.findOne({ email });
-    if (existingEmail) {
-      return res.status(400).json({ message: 'Email already registered' });
-    }
-
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create the User document
-    const user = new User({
-      phone,
-      password: hashedPassword,
-      role: 'admin'
-    });
-    await user.save();
-
-    // Create the associated UserAdditionalInfo document
-    const additionalInfo = new UserAdditionalInfo({
-      name,
-      userId: user._id,
-      email
-      // You can add address or profilePicture if needed.
-    });
-    await additionalInfo.save();
-
-    // Update the User document with the reference to its additional info
-    user.additionalInfo = additionalInfo._id;
-    await user.save();
-
-    res.status(201).json({
-      message: 'Admin created successfully',
-      admin: { user, additionalInfo }
-    });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-};
-
-
-// create Seller
-exports.createSeller = async (req, res) => {
-  try {
-    const { name, phone, email, password } = req.body;
-
-
-      const { error } = createAdminValidation({ name, phone, email, password });
+    const { error } = createAdminValidation({ name, phone, email, password });
     if (error) {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation failed',
-      errors: error.details.map(e => e.message),
-    });
-  }
-
-    // Check if phone is already registered
-    const existingUser = await User.findOne({ phone });
-    if (existingUser) {
-      return res.status(400).json({ message: 'Phone already registered' });
-    }
-
-    // Check if email is already registered
-    const existingEmail = await UserAdditionalInfo.findOne({ email });
-    if (existingEmail) {
-      return res.status(400).json({ message: 'Email already registered' });
-    }
-
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create User document with seller role
-    const user = new User({
-      phone,
-      password: hashedPassword,
-      role: 'seller'
-    });
-    await user.save();
-
-    // Create Additional Info
-    const additionalInfo = new UserAdditionalInfo({
-      name,
-      userId: user._id,
-      email
-    });
-    await additionalInfo.save();
-
-    // Link additional info to user
-    user.additionalInfo = additionalInfo._id;
-    await user.save();
-
-    res.status(201).json({
-      message: 'Seller created successfully',
-      seller: { user, additionalInfo }
-    });
-
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-};
-
-
-// Create Coach
-exports.createCoach = async (req, res) => {
-  try {
-    const { name, phone, email, password } = req.body;
-
-      const { error } = createAdminValidation({ name, phone, email, password });
-      if (error) {
       return res.status(400).json({
-      success: false,
-      message: 'Validation failed',
-      errors: error.details.map(e => e.message),
-    });
+        success: false,
+        message: 'Validation failed',
+        errors: error.details.map(e => e.message),
+      });
     }
 
-    // Check phone for duplicate in User collection
     const existingUser = await User.findOne({ phone });
     if (existingUser) {
       return res.status(400).json({ message: 'Phone already registered' });
     }
 
-    // Check email for duplicate in UserAdditionalInfo collection
     const existingEmail = await UserAdditionalInfo.findOne({ email });
     if (existingEmail) {
       return res.status(400).json({ message: 'Email already registered' });
     }
 
-    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create the User document with role 'coach'
-    const user = new User({
-      phone,
-      password: hashedPassword,
-      role: 'coach'
-    });
+    const user = new User({ phone, password: hashedPassword, role });
     await user.save();
 
-    // Create the associated UserAdditionalInfo document
-    const additionalInfo = new UserAdditionalInfo({
-      name,
-      userId: user._id,
-      email
-    });
+    const additionalInfo = new UserAdditionalInfo({ name, userId: user._id, email });
     await additionalInfo.save();
 
-    // Update the User document with the reference to its additional info
     user.additionalInfo = additionalInfo._id;
     await user.save();
 
     res.status(201).json({
-      message: 'Coach created successfully',
-      coach: { user, additionalInfo }
+      message: `${role.charAt(0).toUpperCase() + role.slice(1)} created successfully`,
+      user,
+      additionalInfo,
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -202,7 +75,7 @@ exports.getAllUsers = async (req, res) => {
 exports.getOfficals = async (req, res) => {
   try {
     // Populate additionalInfo so you can view email and name
-    const users = await User.find({"role":{$in:['admin','coach']}}, 'phone role createdAt')
+    const users = await User.find({"role":{$in:['admin','coach','seller']}}, 'phone role createdAt')
       .populate('additionalInfo', 'name email');
     res.status(200).json({ users });
   } catch (err) {
@@ -282,3 +155,71 @@ exports.getAllInvoices = async (req, res) => {
 };
 
 
+
+// create coach schedule
+
+const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+exports.createCoachSchedule = async (req, res) => {
+  try {
+    const { coachId, days, startTime, endTime } = req.body;
+
+    if (req.user.role !== 'superadmin') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // Optional: Validate days array
+    if (!Array.isArray(days) || days.some(day => !validDays.includes(day))) {
+      return res.status(400).json({ success: false, message: "Invalid 'days' array" });
+    }
+
+    const existing = await CoachSchedule.findOne({ coach: coachId });
+
+    if (existing) {
+      await CoachSchedule.findByIdAndUpdate(existing._id, { days, startTime, endTime });
+      return res.status(200).json({ success: true, message: 'Schedule updated successfully' });
+    } else {
+      await CoachSchedule.create({ coach: coachId, days, startTime, endTime });
+      return res.status(201).json({ success: true, message: 'Schedule created successfully' });
+    }
+  } catch (err) {
+    console.error("Error in creating schedule:", err);
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+
+
+exports.editCoachSchedule = async (req, res) => {
+  try {
+    const { scheduleId } = req.params; // Schedule _id to edit
+    const { days, startTime, endTime } = req.body;
+
+    if (req.user.role !== 'superadmin') {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    // Validate days array
+    if (days && (!Array.isArray(days) || days.some(day => !validDays.includes(day)))) {
+      return res.status(400).json({ success: false, message: "Invalid 'days' array" });
+    }
+
+    const schedule = await CoachSchedule.findById(scheduleId);
+
+    if (!schedule) {
+      return res.status(404).json({ success: false, message: "Schedule not found" });
+    }
+
+    // Update only provided fields
+    if (days) schedule.days = days;
+    if (startTime) schedule.startTime = startTime;
+    if (endTime) schedule.endTime = endTime;
+
+    await schedule.save();
+
+    res.status(200).json({ success: true, message: "Schedule updated successfully", schedule });
+  } catch (err) {
+    console.error("Error editing schedule:", err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};

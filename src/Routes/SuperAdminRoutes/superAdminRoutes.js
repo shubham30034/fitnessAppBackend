@@ -3,9 +3,7 @@ const router = express.Router();
 
 // Controller functions
 const {
-  createAdmin,
-  createSeller,
-  createCoach,
+ createUser,
   getAllUsers,
   deleteUser,
   getAllInvoices,
@@ -16,9 +14,7 @@ const {
 const { authentication, isSuperAdmin } = require("../../Middleware/userAuth");
 
 // Protected routes for Super Admin
-router.post("/create-admin", authentication, isSuperAdmin, createAdmin);
-router.post("/create-coach", authentication, isSuperAdmin, createCoach);
-router.post("/create-seller", authentication, isSuperAdmin, createSeller);
+router.post("/create-user", authentication, isSuperAdmin, createUser);
 router.get("/users", authentication, isSuperAdmin, getAllUsers);
 router.get("/officals", authentication, isSuperAdmin, getOfficals);
 router.delete("/user/:id", authentication, isSuperAdmin, deleteUser);

@@ -5,6 +5,7 @@ const BlacklistedToken = require('../Model/userModel/blackListedToken');
 exports.authentication = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
+  
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Unauthorized: No token provided' });
@@ -20,6 +21,8 @@ exports.authentication = async (req, res, next) => {
     if (!decoded) {
       return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
     }
+
+    console.log("user",decoded)
 
     req.user = decoded;
     next();
