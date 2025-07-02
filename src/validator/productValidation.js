@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const mongoose = require('mongoose');
 
 exports.createProductValidation = ({ name, description, price, category, quantity, sellerId }) => {
   const schema = Joi.object({

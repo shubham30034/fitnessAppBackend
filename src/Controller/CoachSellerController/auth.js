@@ -11,7 +11,6 @@ exports.loginWithPassword = async (req, res) => {
   try {
     const { phone, password } = req.body;
 
-
     const { error } = loginValidation({ phone, password });
     if (error) {
     return res.status(400).json({
@@ -77,6 +76,44 @@ exports.loginWithPassword = async (req, res) => {
     });
   }
 };
+
+
+// controller/coachAuthController.js
+
+exports.getMe = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).populate('additionalInfo');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        phone: user.phone,
+        role: user.role,
+        email: user.additionalInfo?.email || '',
+        name: user.additionalInfo?.name || '',
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error retrieving user",
+      error: error.message,
+    });
+  }
+};
+
+
+
+
 
 // Logout
 exports.logout = async (req, res) => {

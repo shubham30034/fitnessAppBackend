@@ -13,7 +13,8 @@ const {
   disconnectZoom,
   getAllCoaches,
   getCoachById,
-  getMyClients
+  getMyClients,
+  triggerSessionGeneration, // Uncomment this line if you want to use manual session generation
 } = require('../../Controller/CoachingSession/coach');
 
 // Example middleware for authentication and role check
@@ -22,13 +23,17 @@ const { authentication,isAdmin,isCoach,isSeller,isSuperAdmin,isUser } = require(
 // ---------- USER ROUTES ----------
 router.get('/coaches', authentication, getAllCoaches); 
 router.get('/coaches/:coachId', authentication, getCoachById);
-router.post('/subscribe', authentication, subscribeToCoach);
+router.post('/subscribe',isUser, authentication, subscribeToCoach);
 router.get('/today-session', authentication, getTodaysSession);
 
 // ---------- COACH ROUTES ----------
 router.get('/coach/upcoming-sessions', authentication, getUpcomingCoachSessions);
 router.get('/coach/schedule', authentication, getCoachSchedule);
 router.get('/coach/clients', authentication, getMyClients);
+
+// chron job to generate Zoom sessions
+// Uncomment the line below to manually trigger session generation
+router.post('/coach/generate-sessions', authentication, triggerSessionGeneration); 
 
 // ---------- SUPERADMIN ROUTES ----------
 router.post('/superadmin/schedule', authentication, createCoachSchedule);

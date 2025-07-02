@@ -9,7 +9,8 @@ const {
   getAllProducts,
   getSingleProduct,
   deleteProduct,
-  updateProduct
+  updateProduct,
+  getOwnProducts
 } = require("../../Controller/ProductsController/createProduct");
 
 const {addToCart} = require("../../Controller/ProductsController/cart")
@@ -48,42 +49,57 @@ const uploadProfileImage = require("../../Middleware/uploadProfileUser");
 
 
 
-// ======================= Product Routes =======================
-route.post("/products", authentication, isSeller, createProduct);         // Only sellers
-route.put("/products/:id", authentication, isSeller, updateProduct);     // Only sellers
-route.get("/products", authentication, getAllProducts);                   // All users
-route.get("/products/:id", authentication, getSingleProduct);             // All users
-route.delete("/products/:id", authentication, isSeller, deleteProduct); // Only super admin
-route.post("/:productId",authentication,isSeller, uploadProductImage, uploadProductImages);
-route.put("/:productId",authentication,isSeller,uploadProductImage, updateSpecificProductImage); // Update product images
+// ======================= 👤 USER ROUTES =======================
+
+// Get all products - accessible to any authenticated user
+route.get("/products", authentication, getAllProducts);
+route.get("/products/:id", authentication, getSingleProduct);
+
+// Buy product & Payment-related
+route.post("/buy", authentication, isUser, buyProduct); // Place order
+route.post("/verify-signature", verifySignature);       // Razorpay webhook
+route.get("/orders", authentication, isUser, getAllOrdersOfUser); // View orders
+route.get("/invoice/:orderId", authentication, isUser, getInvoice); // View invoice
 
 
 
+// ======================= 🛒 SELLER ROUTES =======================
+
+// Product CRUD (Seller only)
+route.get("/my-products", authentication, isSeller, getOwnProducts); // Get own products
+route.post("/products", authentication, isSeller, createProduct);
+route.put("/products/:id", authentication, isSeller, updateProduct);
+route.delete("/products/:id", authentication, isSeller, deleteProduct);
+
+// Upload/Update Product Images
+// POST: Add/upload multiple images for a product
+route.post(
+  "/:productId",
+  authentication,
+  isSeller,
+  uploadProductImage, // ← multer middleware (must come before controller)
+  uploadProductImages  // ← your actual controller logic
+);
+
+// PUT: Replace/update existing images (or maybe a specific image slot)
+route.put(
+  "/:productId",
+  authentication,
+  isSeller,
+  uploadProductImage,
+  updateSpecificProductImage
+);
 
 
+// ======================= 🧑‍💼 ADMIN / SUPERADMIN ROUTES =======================
 
+// CATEGORY ROUTES (Super Admin)
+route.post("/categories", authentication, isSuperAdmin, createCategory); 
+route.get("/categories", getAllCategories); // Public
 
-// ======================= Category Routes =======================
-route.post("/categories", authentication, isSuperAdmin, createCategory);  // Only super admin
-route.get("/categories", getAllCategories);                               // Public
-
-// ======================= Subcategory Routes =======================
-route.post("/subcategories", authentication, isAdmin, createSubCategory); // Only admin
-route.get("/subcategories", getAllSubCategories);                         // Public
-
-// ======================= Payment & Order Routes =======================
-route.post("/buy", authentication, isUser, buyProduct);                   // User initiates purchase
-route.post("/verify-signature", verifySignature);                         // Razorpay webhook
-
-// ✅ New: Get all orders of a user
-route.get("/orders", authentication, isUser, getAllOrdersOfUser);
-
-// ✅ New: Get invoice for a specific order
-route.get("/invoice/:orderId", authentication, isUser, getInvoice);
-
-
-
-
+// SUBCATEGORY ROUTES (Admin)
+route.post("/subcategories", authentication, isAdmin, createSubCategory); 
+route.get("/subcategories", getAllSubCategories); // Public
 
 
 module.exports = route;

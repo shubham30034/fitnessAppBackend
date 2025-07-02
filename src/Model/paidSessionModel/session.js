@@ -1,8 +1,9 @@
-// models/Session.js
 const mongoose = require('mongoose');
 
+
+// models/Session.js
 const sessionSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  users: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }], // ⬅️ changed to array
   coach: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   date: { type: Date, required: true },
   startTime: { type: String, required: true },

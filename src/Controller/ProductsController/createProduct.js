@@ -59,6 +59,8 @@ exports.updateProduct = async (req, res) => {
     const sellerId = req.user.id; // From authentication middleware
     const { name, description, price, category, quantity } = req.body;
 
+    console.log("Updating product:", name, description, price, category, quantity);
+
     // Validate required fields
    const { error } = updateProductValidation({ productId, name, description, price, category, quantity });
   if (error) {

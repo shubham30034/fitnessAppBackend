@@ -2,10 +2,11 @@ const express = require("express");
 const route = express.Router();
 
 const {
-  loginWithPassword,
+loginWithPassword ,
   logout,
   getCurrentUser,
   regenerateRefreshToken,
+  getMe
 } = require("../../Controller/CoachSellerController/auth");
 
 const {
@@ -16,6 +17,9 @@ const {
 
 // ✅ Login with phone and password (for Coach or Seller)
 route.post("/login", loginWithPassword);
+
+// ✅ Get current authenticated user details (for Coach or Seller)
+route.get("/me", authentication, getMe);
 
 // ✅ Logout the current session
 route.post("/logout", authentication, logout);
