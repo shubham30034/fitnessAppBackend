@@ -40,8 +40,9 @@ router.post("/refresh-token", regenerateRefreshToken);
 
 router.post("/additional-info", authentication,createAdditionalInfo)
 router.get("/additional-info", authentication,getAdditionalInfo)
-router.delete("/additional-info", authentication, deleteAdditionalInfo); 
-router.put("/additional-info", authentication, uploadProfileImage,uploadProfilePicture);
+router.put("/additional-info", authentication, updateAdditionalInfo)
+router.delete("/additional-info", authentication, deleteAdditionalInfo)
+router.post("/additional-info/profile", authentication, uploadProfileImage,uploadProfilePicture);
 
 
 

@@ -58,7 +58,7 @@ exports.addToCart = async (req, res) => {
         res.status(200).json({ 
             success:true,
             message: 'Added to cart', 
-            cart
+            data: cart
          });
     } catch (error) {
         res.status(500).json({ 
@@ -82,7 +82,7 @@ exports.getCart = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Cart not found' });
         }
 
-        res.status(200).json({ success: true, cart });
+        res.status(200).json({ success: true, data: cart });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error', error: error.message });
     }
@@ -93,15 +93,14 @@ exports.getCart = async (req, res) => {
 exports.removeFromCart = async (req, res) => {
   const userId = req.user.id;
   const productId = req.params.productId;
+  const { quantity } = req.body; // optional: amount to reduce
 
-if(!productId){
-  return res.status(400).json({
-    success:false,
-    message:"please provide product id"
-  })
-}
-
-
+  if (!productId) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide product id"
+    });
+  }
 
   try {
     const cart = await Cart.findOne({ user: userId });
@@ -110,27 +109,39 @@ if(!productId){
       return res.status(404).json({ success: false, message: 'Cart not found' });
     }
 
-    const initialLength = cart.items.length;
+    const itemIndex = cart.items.findIndex(item => item.product.toString() === productId);
 
-    console.log("lenghth",initialLength)
-
-    cart.items = cart.items.filter(item => {
-      const itemProductId = item.product._id ? item.product._id.toString() : item.product.toString();
-      return itemProductId !== productId;
-    });
-
-    if (cart.items.length === initialLength) {
+    if (itemIndex === -1) {
       return res.status(404).json({ success: false, message: 'Item not found in cart' });
+    }
+
+    if (quantity && quantity > 0) {
+      const currentQty = cart.items[itemIndex].quantity;
+
+      if (quantity > currentQty) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot remove more than current quantity (${currentQty}) in cart`
+        });
+      }
+
+      cart.items[itemIndex].quantity -= quantity;
+
+      if (cart.items[itemIndex].quantity === 0) {
+        cart.items.splice(itemIndex, 1); // remove item completely
+      }
+    } else {
+      // Remove item entirely if no quantity is specified
+      cart.items.splice(itemIndex, 1);
     }
 
     await cart.save();
 
-    res.status(200).json({ success: true, message: 'Item removed from cart', cart });
+    res.status(200).json({ success: true, message: 'Item updated/removed from cart', data: cart });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
-
 
 
 exports.updateCartItemQuantity = async (req, res) => {
@@ -158,7 +169,7 @@ exports.updateCartItemQuantity = async (req, res) => {
     }
 
     await cart.save();
-    res.status(200).json({ success: true, message: 'Cart updated', cart });
+    res.status(200).json({ success: true, message: 'Cart updated', data: cart });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
@@ -180,7 +191,7 @@ exports.clearCart = async (req, res) => {
         cart.items = [];
         await cart.save();
 
-        res.status(200).json({ success: true, message: 'Cart cleared', cart });
+        res.status(200).json({ success: true, message: 'Cart cleared', data: cart });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error', error: error.message });
     }
@@ -199,7 +210,7 @@ exports.getCartTotal = async (req, res) => {
             return sum + (item.product.price * item.quantity);
         }, 0);
 
-        res.status(200).json({ success: true, total });
+        res.status(200).json({ success: true, data: total });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error', error: error.message });
     }

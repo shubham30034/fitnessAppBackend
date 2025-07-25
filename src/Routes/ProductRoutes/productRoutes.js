@@ -10,7 +10,8 @@ const {
   getSingleProduct,
   deleteProduct,
   updateProduct,
-  getOwnProducts
+  getOwnProducts,
+  getProductByCategory
 } = require("../../Controller/ProductsController/createProduct");
 
 const {addToCart} = require("../../Controller/ProductsController/cart")
@@ -54,6 +55,7 @@ const uploadProfileImage = require("../../Middleware/uploadProfileUser");
 // Get all products - accessible to any authenticated user
 route.get("/products", authentication, getAllProducts);
 route.get("/products/:id", authentication, getSingleProduct);
+route.get("/products/category/:categoryId", authentication, getProductByCategory);
 
 // Buy product & Payment-related
 route.post("/buy", authentication, isUser, buyProduct); // Place order

@@ -77,22 +77,35 @@ exports.updateAdditionalInfo = async (req, res) => {
     const userId = req.user.id;
     const { name, email, address } = req.body;
 
+    console.log("update is running")
 
+    // Prepare update object with only provided fields
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (email !== undefined) updateData.email = email;
+    if (address !== undefined) updateData.address = address;
 
- const {error} = await additionalInfoValidate({name,email,address})
-    if (error) {
+    if (Object.keys(updateData).length === 0) {
       return res.status(400).json({
         success: false,
-        message: error.details[0].message,
+        message: 'No valid fields provided for update',
       });
     }
 
-    
+
+    // Update the provided fields only
     const updated = await UserAdditionalInfo.findOneAndUpdate(
       { userId },
-      { name, email, address },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { $set: updateData },
+      { new: true }
     );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'User additional info not found',
+      });
+    }
 
     res.status(200).json({
       success: true,

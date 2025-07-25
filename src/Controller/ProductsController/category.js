@@ -49,7 +49,7 @@ exports.createCategory = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Category created successfully",
-            category: newCategory,
+            data: newCategory,
         });
 
     } catch (error) {
@@ -71,7 +71,7 @@ exports.getAllCategories = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "All categories fetched",
-            categories,
+            data: categories,
         });
     } catch (error) {
         return res.status(500).json({

@@ -44,7 +44,7 @@ exports.createSubCategory = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Subcategory created successfully",
-      subCategory: newSubCategory,
+      data: newSubCategory,
     });
 
   } catch (error) {
@@ -65,7 +65,7 @@ exports.getAllSubCategories = async (req, res) => {
         res.status(200).json({
             success: true,
             message: "All subcategories fetched",
-            subCategories,
+            data: subCategories,
         });
     } catch (error) {
         res.status(500).json({ success: false, message: "Server error", error: error.message });

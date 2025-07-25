@@ -12,7 +12,6 @@ const userAdditionalInfoSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    unique: true,
     sparse: true,
   },
   address: {

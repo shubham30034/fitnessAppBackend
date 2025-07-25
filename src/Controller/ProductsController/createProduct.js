@@ -4,7 +4,8 @@ const Category = require("../../Model/ProductsModel/category");
 const fs = require('fs');
 const path = require('path');
 const { uploadMultipleImagesToCloudinary } = require("../../Utils/imageUploader");
-const {createProductValidation,updateProductValidation} = require("../../validator/productValidation")
+const {createProductValidation,updateProductValidation} = require("../../validator/productValidation");
+const { date } = require("joi");
 
 // creatre Profduct
 exports.createProduct = async (req, res) => {
@@ -39,7 +40,7 @@ exports.createProduct = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Product created, now upload images separately",
-      product: newProduct,
+      data: newProduct,
     });
 
   } catch (error) {
@@ -91,7 +92,7 @@ exports.updateProduct = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Product updated successfully",
-      product
+      data: product,
     });
 
   } catch (error) {
@@ -140,7 +141,7 @@ exports.uploadProductImages = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Images uploaded successfully",
-      product
+      data: product,
     });
 
   } catch (error) {
@@ -223,7 +224,7 @@ exports.updateSpecificProductImage = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Product image updated successfully",
-      product
+      data: product,
     });
 
   } catch (error) {
@@ -247,7 +248,7 @@ exports.getAllProducts = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "All products fetched",
-      products,
+      data: products,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server error", error: error.message });
@@ -296,7 +297,7 @@ exports.getOwnProducts = async (req, res) => {
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit),
-      products
+      data: products,
     });
 
   } catch (error) {
@@ -318,12 +319,37 @@ exports.getSingleProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: "Product not found" });
     }
 
-    res.status(200).json({ success: true, product });
+    res.status(200).json({ success: true, data: product });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 };
 
+
+exports.getProductByCategory = async (req, res) => {
+  try {
+    const categoryId = req.params.categoryId;
+    const products = await Product.find({ category: categoryId }).populate("category")
+
+    if(!products || products.length === 0){
+      return res.status(404).json({ success: false, message: "No products found in this category" });
+
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Products fetched successfully",
+      data: products
+    })
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching products by category",
+      error: error.message,
+    })
+  }
+}
 
 // delete a product and its images
 exports.deleteProduct = async (req, res) => {
