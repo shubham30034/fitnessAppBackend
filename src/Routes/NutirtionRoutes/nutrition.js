@@ -20,9 +20,8 @@ const {
   removeFoodItem
 } = require("../../Controller/CalorieSection/caloriesRecorder");
 
-// Route to search for food (GET or POST depending on your frontend)
-// Use GET if query params (e.g., /search?foodName=apple), POST if body
-route.get("/search", authentication, searchFood);
+// it should be post not get
+route.post("/search", authentication, searchFood);
 
 // Route to record daily calories for today only
 route.post("/record", authentication, recordDailyCalories);
