@@ -17,7 +17,8 @@ const {
   getAdditionalInfo,
   updateAdditionalInfo,
   uploadProfilePicture,
-  deleteAdditionalInfo
+  deleteAdditionalInfo,
+  getProfilePictureUrls
 } = require("../../Controller/UserController/additionalInfo");
 
 
@@ -28,7 +29,7 @@ const {
 
 // Middleware
 const { authentication, isUser } = require("../../Middleware/userAuth");
-const uploadProfileImage = require("../../Middleware/uploadProfileUser")
+const { uploadSingleImage, handleUploadError } = require("../../Middleware/uploadProfileUser")
 
 // Public routes
 router.post("/send-otp", sendOtp);
@@ -42,7 +43,9 @@ router.post("/additional-info", authentication,createAdditionalInfo)
 router.get("/additional-info", authentication,getAdditionalInfo)
 router.put("/additional-info", authentication, updateAdditionalInfo)
 router.delete("/additional-info", authentication, deleteAdditionalInfo)
-router.post("/additional-info/profile", authentication, uploadProfileImage,uploadProfilePicture);
+router.post("/additional-info/profile", authentication, uploadSingleImage, uploadProfilePicture);
+router.get("/additional-info/profile", authentication, getProfilePictureUrls);
+router.use(handleUploadError); // Add error handling middleware
 
 
 

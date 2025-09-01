@@ -214,7 +214,7 @@ exports.recordSet = async (req, res) => {
       });
     }
 
-    // check if userExerciseId is valid
+    // check if userExerciseId is valid and belongs to the current user
     const userExercise = await UserExercise.findById({_id: userExerciseId});
 
 
@@ -223,6 +223,13 @@ exports.recordSet = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'User exercise not found'
+      });
+    }
+
+    if (userExercise.userId.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: This exercise is not owned by the current user'
       });
     }
 

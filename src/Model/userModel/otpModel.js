@@ -14,8 +14,15 @@ const otpSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
+  isFailedAttempt: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });
+
+// Add index for rate limiting queries
+otpSchema.index({ userId: 1, isFailedAttempt: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Otp', otpSchema);

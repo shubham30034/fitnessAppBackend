@@ -17,7 +17,19 @@ exports.authentication = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Unauthorized: Token is blacklisted' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtError) {
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Token has expired' });
+      } else if (jwtError.name === 'JsonWebTokenError') {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
+      } else {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Token verification failed' });
+      }
+    }
+
     if (!decoded) {
       return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
     }
@@ -27,6 +39,7 @@ exports.authentication = async (req, res, next) => {
     req.user = decoded;
     next();
   } catch (err) {
+    console.error('Authentication middleware error:', err);
     return res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 };
@@ -78,6 +91,16 @@ exports.isUser = (req, res, next) => {
 
   if (req.user.role !== 'user') {
     return res.status(403).json({ success: false, message: 'Forbidden: Users only' });
+  }
+  next();
+};
+
+// Coach Manager Authorization Middleware
+exports.isCoachManager = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized: No user data' });
+
+  if (req.user.role !== 'coachmanager') {
+    return res.status(403).json({ success: false, message: 'Forbidden: Coach Managers only' });
   }
   next();
 };

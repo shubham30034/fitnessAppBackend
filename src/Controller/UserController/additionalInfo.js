@@ -130,7 +130,7 @@ exports.getAdditionalInfo = async (req, res) => {
 
 
     if(!userId){
-      return res.tatus(400).json({
+      return res.status(400).json({
         success:false,
         message:"unable to find userId",
       })
@@ -166,7 +166,7 @@ exports.deleteAdditionalInfo = async (req, res) => {
 
     
     if(!userId){
-      return res.tatus(400).json({
+      return res.status(400).json({
         success:false,
         message:"unable to find userId",
       })
@@ -206,7 +206,7 @@ exports.deleteAdditionalInfo = async (req, res) => {
   }
 };
 
-// UPLOAD Profile Picture
+// UPLOAD Profile Picture with Mobile Optimization
 exports.uploadProfilePicture = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -215,22 +215,46 @@ exports.uploadProfilePicture = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const filename = req.file.filename; // just filename, e.g. "168500000-original.jpg"
+    const filename = req.file.filename;
+    const filePath = req.file.path;
+    const uploadDir = path.dirname(filePath);
+
+    // Import image optimization utilities
+    const {
+      optimizeProfilePicture,
+      generateResponsiveUrls,
+      cleanupOldImages,
+      isSharpAvailable,
+      generateFallbackResponsiveImages
+    } = require('../../Utils/imageOptimizer');
+
+    // Generate optimized versions for mobile
+    let optimizedImages;
+    if (isSharpAvailable()) {
+      optimizedImages = await optimizeProfilePicture(filePath, uploadDir, filename);
+    } else {
+      console.log('Using fallback image processing (Sharp not available)');
+      optimizedImages = await generateFallbackResponsiveImages(filePath, uploadDir, filename);
+    }
 
     let additionalInfo = await UserAdditionalInfo.findOne({ userId });
 
     if (additionalInfo) {
-      // Remove old file if exists
+      // Clean up old images if they exist
       if (additionalInfo.profilePicture) {
-        const oldFilePath = path.join(__dirname, `../../../uploads/profile/${userId}/${additionalInfo.profilePicture}`);
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
-        }
+        cleanupOldImages(uploadDir, additionalInfo.profilePicture);
       }
+      
+      // Store the optimized image data
       additionalInfo.profilePicture = filename;
+      additionalInfo.profilePictureSizes = optimizedImages; // Store all sizes
       await additionalInfo.save();
     } else {
-      additionalInfo = new UserAdditionalInfo({ userId, profilePicture: filename });
+      additionalInfo = new UserAdditionalInfo({ 
+        userId, 
+        profilePicture: filename,
+        profilePictureSizes: optimizedImages
+      });
       await additionalInfo.save();
 
       const user = await User.findById(userId);
@@ -240,13 +264,19 @@ exports.uploadProfilePicture = async (req, res) => {
       }
     }
 
-    // Construct full URL/path to send in response
-    const profilePictureUrl = `/uploads/profile/${userId}/${filename}`;
+    // Generate responsive URLs for different screen sizes
+    const baseUrl = `/uploads/profile/${userId}`;
+    const responsiveUrls = generateResponsiveUrls(baseUrl, filename);
 
     res.status(200).json({
       success: true,
-      message: 'Profile picture uploaded successfully',
-      data: { profilePictureUrl, additionalInfo },
+      message: 'Profile picture uploaded and optimized successfully',
+      data: { 
+        profilePictureUrl: responsiveUrls.medium, // Default to medium size
+        responsiveUrls,
+        optimizedSizes: optimizedImages,
+        additionalInfo 
+      },
     });
 
   } catch (error) {
@@ -256,9 +286,53 @@ exports.uploadProfilePicture = async (req, res) => {
       if (fs.existsSync(errorFilePath)) fs.unlinkSync(errorFilePath);
     }
 
+    console.error('Profile picture upload error:', error);
     res.status(500).json({
       success: false,
       message: 'Upload failed',
+      error: error.message,
+    });
+  }
+};
+
+// Get optimized profile picture URLs
+exports.getProfilePictureUrls = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { size = 'medium' } = req.query; // Default to medium size
+
+    const additionalInfo = await UserAdditionalInfo.findOne({ userId });
+
+    if (!additionalInfo || !additionalInfo.profilePicture) {
+      return res.status(404).json({
+        success: false,
+        message: 'Profile picture not found'
+      });
+    }
+
+    const baseUrl = `/uploads/profile/${userId}`;
+    const responsiveUrls = {
+      thumbnail: `${baseUrl}/${additionalInfo.profilePictureSizes?.thumbnail || additionalInfo.profilePicture}`,
+      small: `${baseUrl}/${additionalInfo.profilePictureSizes?.small || additionalInfo.profilePicture}`,
+      medium: `${baseUrl}/${additionalInfo.profilePictureSizes?.medium || additionalInfo.profilePicture}`,
+      large: `${baseUrl}/${additionalInfo.profilePictureSizes?.large || additionalInfo.profilePicture}`,
+      original: `${baseUrl}/${additionalInfo.profilePictureSizes?.original || additionalInfo.profilePicture}`
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        currentSize: responsiveUrls[size] || responsiveUrls.medium,
+        allSizes: responsiveUrls,
+        selectedSize: size
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching profile picture URLs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
       error: error.message,
     });
   }

@@ -2,16 +2,14 @@ const Joi = require("joi");
 
 // Validate send OTP data
 exports.sendOtpValidation = ({phone}) => {
-
-
-
   const schema = Joi.object({
     phone: Joi.string()
-      .pattern(/^[0-9]{10}$/)
+      .pattern(/^(\+91)?[0-9]{10}$/) // Supports +91 prefix and 10 digits
       .required()
       .messages({
-        "string.pattern.base": "Phone number must be exactly 10 digits",
+        "string.pattern.base": "Phone number must be 10 digits (with optional +91 prefix)",
         "any.required": "Phone number is required",
+        "string.empty": "Phone number cannot be empty",
       }),
   });
 
@@ -22,11 +20,12 @@ exports.sendOtpValidation = ({phone}) => {
 exports.verifyOtpValidation = ({phone,otp }) => {
   const schema = Joi.object({
     phone: Joi.string()
-      .pattern(/^[0-9]{10}$/)
+      .pattern(/^(\+91)?[0-9]{10}$/) // Supports +91 prefix and 10 digits
       .required()
       .messages({
-        "string.pattern.base": "Phone number must be exactly 10 digits",
+        "string.pattern.base": "Phone number must be 10 digits (with optional +91 prefix)",
         "any.required": "Phone number is required",
+        "string.empty": "Phone number cannot be empty",
       }),
     otp: Joi.string()
       .length(4)
@@ -36,6 +35,7 @@ exports.verifyOtpValidation = ({phone,otp }) => {
         "string.length": "OTP must be exactly 4 digits",
         "string.pattern.base": "OTP must be numeric",
         "any.required": "OTP is required",
+        "string.empty": "OTP cannot be empty",
       }),
   });
  

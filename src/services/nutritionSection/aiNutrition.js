@@ -23,13 +23,9 @@ Food: ${foodName}`;
 
   try {
     const data = await openRouter(prompt)
-
-   if(!data){
-    return res.status(400).json({
-      success:false,
-      message:"unable to fetch data from ai"
-    })
-   }
+    if (!data) {
+      return null;
+    }
 
 
    

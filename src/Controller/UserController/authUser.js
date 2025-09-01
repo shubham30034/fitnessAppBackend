@@ -152,17 +152,12 @@ exports.verifyOtp = async (req, res) => {
 
    const {error} = verifyOtpValidation({phone,otp})
 
-
     if (error) {
       return res.status(400).json({
         success: false,
         message: error.details[0].message,
       });
     }
-
-
-
-
 
     const user = await User.findOne({ phone }).populate('additionalInfo');
     console.log("User found:", user);
@@ -174,6 +169,20 @@ exports.verifyOtp = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only users with role \"user\" can log in' });
     }
 
+    // ✅ Rate limiting: Check for recent failed attempts
+    const recentFailedAttempts = await Otp.countDocuments({
+      userId: user._id,
+      isFailedAttempt: true,
+      createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) } // 15 minutes
+    });
+
+    if (recentFailedAttempts >= 5) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed attempts. Please wait 15 minutes before trying again.',
+      });
+    }
+
     // ✅ Always fetch latest OTP
     const userOtp = await Otp.findOne({ userId: user._id }).sort({ createdAt: -1 });
 
@@ -182,6 +191,14 @@ exports.verifyOtp = async (req, res) => {
     console.log("OTP expiry:", userOtp?.expiresAt);
 
     if (!userOtp || new Date() > userOtp.expiresAt) {
+      // Mark as failed attempt
+      await Otp.create({
+        userId: user._id,
+        otp: 'failed',
+        expiresAt: new Date(),
+        isFailedAttempt: true
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'OTP has expired or not found, please request a new one',
@@ -190,6 +207,14 @@ exports.verifyOtp = async (req, res) => {
 
     const isMatch = await bcrypt.compare(otp, userOtp.otp);
     if (!isMatch) {
+      // Mark as failed attempt
+      await Otp.create({
+        userId: user._id,
+        otp: 'failed',
+        expiresAt: new Date(),
+        isFailedAttempt: true
+      });
+      
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
@@ -206,8 +231,6 @@ const createRefreshToken = await RefreshToken.create({
   userId: user._id, 
   token: refreshToken 
 });
-
-
 
     res.status(200).json({
       success: true,
@@ -241,7 +264,8 @@ exports.regenerateRefreshToken = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Refresh token is required' });
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    // Verify refresh token with the refresh secret, not the access secret
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
     if (!decoded) {
       return res.status(400).json({ success: false, message: 'Invalid refresh token' });
     }
@@ -255,7 +279,7 @@ exports.regenerateRefreshToken = async (req, res) => {
     await RefreshToken.deleteOne({ token: refreshToken });
 
     const payload = { id: decoded.id || decoded.userId, role: decoded.role };
-    const { accessToken, refreshToken: newRefreshToken } = generateToken(payload);
+    const { accessToken, refreshToken: newRefreshToken } = await generateToken(payload);
 
     await RefreshToken.create({ userId: payload.id, token: newRefreshToken });
 
@@ -304,7 +328,7 @@ exports.logout = async (req, res) => {
 
     // 🛑 Decode the access token and store in blacklist
     const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
-    const expiresAt = new Date(decoded.exp * 1000);
+    const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await BlacklistedToken.create({ token: accessToken, expiresAt });
 

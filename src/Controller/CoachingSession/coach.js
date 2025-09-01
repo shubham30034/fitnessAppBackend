@@ -1,11 +1,14 @@
 const axios = require("axios");
 const cron = require("node-cron");
-const CoachSchedule = require("../../Model/paidSessionModel/coachSheduleSchema");
-const UserSubscription = require("../../Model/paidSessionModel/userBookingCoach");
-const Coach = require("../../Model/paidSessionModel/coach");
+const CoachSchedule = require("../../Model/paidSessionModel/coachSchedule");
+const UserSubscription = require("../../Model/paidSessionModel/userSubscription");
+const CoachProfile = require("../../Model/paidSessionModel/coach");
+const CoachZoom = require("../../Model/paidSessionModel/coachZoom");
 const Session = require("../../Model/paidSessionModel/session");
 const User = require("../../Model/userModel/userModel");
-
+const UserAdditionalInfo = require("../../Model/userModel/additionalInfo");
+const InAppProduct = require("../../Model/paidSessionModel/inAppProducts");
+const { updateCoachProfileValidation, cancelSessionValidation } = require("../../validator/coachValidation");
 
 
 // ===================== PUBLIC CONTROLLERS =====================
@@ -81,68 +84,9 @@ exports.getCoachById = async (req, res) => {
 
 // ===================== USER-SIDE CONTROLLERS =====================
 
-exports.subscribeToCoach = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { coachId } = req.body;
-
-    // 1. Validate coach
-    const coachUser = await User.findOne({ _id: coachId, role: "coach" });
-    if (!coachUser) {
-      return res.status(404).json({ success: false, message: "Coach not found" });
-    }
-
-    // 2. Ensure coach has a schedule
-    const coachSchedule = await CoachSchedule.findOne({
-      coach: coachId,
-      days: { $exists: true, $ne: [] },
-      startTime: { $exists: true },
-      endTime: { $exists: true },
-    });
-
-    if (!coachSchedule) {
-      return res.status(400).json({ success: false, message: "Coach has no active schedule" });
-    }
-
-    // 3. Prevent duplicate subscription
-    const existing = await UserSubscription.findOne({
-      client: userId,
-      coach: coachId,
-      isActive: true,
-    });
-    if (existing) {
-      return res.status(400).json({ success: false, message: "Already subscribed" });
-    }
-
-    // 4. Set start and end dates (truncate startDate to midnight)
-    const startDate = new Date();
-    startDate.setHours(0, 0, 0, 0); // 👈 ensure startDate matches session date logic
-
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + 1);
-
-    // 5. Create subscription
-    const subscription = await UserSubscription.create({
-      client: userId,
-      coach: coachId,
-      startDate,
-      endDate,
-      isActive: true,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "Subscribed successfully. Sessions will be scheduled soon.",
-      subscription,
-    });
-  } catch (err) {
-    console.error("❌ Subscription error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Server Error",
-    });
-  }
-};
+// Note: subscribeToCoach function removed - use in-app purchase endpoints instead:
+// POST /api/coaching/inapp/apple/verify-receipt for Apple App Store
+// POST /api/coaching/inapp/google/verify-purchase for Google Play Store
 
 exports.getTodaysSession = async (req, res) => {
   try {
@@ -195,6 +139,79 @@ exports.getTodaysSession = async (req, res) => {
   } catch (err) {
     console.error("Session Error:", err);
     res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+// =============== USER UTILITIES ===============
+exports.getMySubscription = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+
+    const subscription = await UserSubscription.findOne({
+      client: userId,
+      startDate: { $lte: today },
+      endDate: { $gte: today },
+      isActive: true,
+    }).populate({ path: 'coach', select: 'phone additionalInfo', populate: { path: 'additionalInfo', select: 'name email' } });
+
+    if (!subscription) {
+      return res.status(404).json({ success: false, message: 'No active subscription' });
+    }
+
+    return res.status(200).json({ success: true, subscription });
+  } catch (err) {
+    console.error('getMySubscription error:', err);
+    return res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
+
+exports.cancelSubscription = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+
+    const subscription = await UserSubscription.findOne({ client: userId, isActive: true });
+    if (!subscription) {
+      return res.status(404).json({ success: false, message: 'No active subscription to cancel' });
+    }
+
+    subscription.isActive = false;
+    subscription.endDate = today;
+    await subscription.save();
+
+    return res.status(200).json({ success: true, message: 'Subscription cancelled' });
+  } catch (err) {
+    console.error('cancelSubscription error:', err);
+    return res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
+
+exports.getUserUpcomingSessions = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sessions = await Session.find({ users: userId, date: { $gte: today } })
+      .sort({ date: 1 })
+      .populate({ path: 'coach', select: 'phone additionalInfo', populate: { path: 'additionalInfo', select: 'name email' } });
+
+    const data = sessions.map((s) => ({
+      date: s.date,
+      time: `${s.startTime} - ${s.endTime}`,
+      coach: {
+        id: s.coach?._id,
+        name: s.coach?.additionalInfo?.name || '',
+        email: s.coach?.additionalInfo?.email || '',
+      },
+      join_url: s.zoomJoinUrl,
+    }));
+
+    return res.status(200).json({ success: true, count: data.length, sessions: data });
+  } catch (err) {
+    console.error('getUserUpcomingSessions error:', err);
+    return res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
 
@@ -266,7 +283,8 @@ exports.getCoachSchedule = async (req, res) => {
       });
     }
 
-    const schedule = await CoachSchedule.findOne({ coach: coachRecord._id }).select('days startTime endTime');
+    const schedule = await CoachSchedule.findOne({ coach: coachRecord._id })
+      .select('days startTime endTime');
     if (!schedule) {
       return res.status(404).json({
         success: false,
@@ -338,114 +356,117 @@ exports.getMyClients = async (req, res) => {
 
 // ===================== DAILY CRON JOB =====================
 // 
-// cron.schedule("0 6 * * *", async () => {
-//   try {
-//     console.log("⏰ Cron job started: Zoom session generation...");
+cron.schedule("0 6 * * *", async () => {
+  try {
+    console.log("⏰ Cron job started: Zoom session generation...");
 
-//     // Auto-delete sessions older than 60 days
-//     const twoMonthsAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-//     const deleteResult = await Session.deleteMany({ date: { $lt: twoMonthsAgo } });
-//     console.log(`🧹 Deleted ${deleteResult.deletedCount} old sessions`);
+    // Auto-delete sessions older than 60 days
+    const twoMonthsAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const deleteResult = await Session.deleteMany({ date: { $lt: twoMonthsAgo } });
+    console.log(`🧹 Deleted ${deleteResult.deletedCount} old sessions`);
 
-//     const today = new Date();
+    const today = new Date();
 
-//     for (let i = 0; i < 3; i++) {
-//       const targetDate = new Date(today);
-//       targetDate.setDate(today.getDate() + i);
-//       targetDate.setHours(0, 0, 0, 0);
-//       const dayName = targetDate.toLocaleDateString("en-US", { weekday: "long" });
+    for (let i = 0; i < 3; i++) {
+      const targetDate = new Date(today);
+      targetDate.setDate(today.getDate() + i);
+      targetDate.setHours(0, 0, 0, 0);
+      const dayName = targetDate.toLocaleDateString("en-US", { weekday: "long" });
 
-//       const subscriptions = await UserSubscription.find({
-//         isActive: true,
-//         startDate: { $lte: targetDate },
-//         endDate: { $gte: targetDate },
-//       });
+      const subscriptions = await UserSubscription.find({
+        isActive: true,
+        startDate: { $lte: targetDate },
+        endDate: { $gte: targetDate },
+      });
 
-//       const processedCoaches = new Set();
+      const processedCoaches = new Set();
 
-//       for (const sub of subscriptions) {
-//         const coachId = sub.coach.toString();
-//         if (processedCoaches.has(coachId)) continue;
-//         processedCoaches.add(coachId);
+      for (const sub of subscriptions) {
+        const coachId = sub.coach.toString();
+        if (processedCoaches.has(coachId)) continue;
+        processedCoaches.add(coachId);
 
-//         const schedule = await CoachSchedule.findOne({ coach: sub.coach });
-//         if (!schedule || !schedule.days.includes(dayName)) continue;
+        const schedule = await CoachSchedule.findOne({ coach: sub.coach });
+        if (!schedule || !schedule.days.includes(dayName)) continue;
 
-//         const existing = await Session.findOne({ coach: sub.coach, date: targetDate });
-//         if (existing) continue;
+        const existing = await Session.findOne({ coach: sub.coach, date: targetDate });
+        if (existing) continue;
 
-//         const coach = await Coach.findOne({ user: sub.coach });
-//         if (!coach || !coach.zoomRefreshToken || !coach.zoomUserId) continue;
+        const coachProfile = await CoachProfile.findOne({ user: sub.coach });
+        const coachZoom = await CoachZoom.findOne({ user: sub.coach });
+        if (!coachProfile || !coachZoom || !coachZoom.zoomRefreshToken || !coachZoom.zoomUserId) continue;
 
-//         const [startH, startM] = schedule.startTime.split(":").map(Number);
-//         const meetingStart = new Date(targetDate);
-//         meetingStart.setHours(startH, startM, 0, 0);
+        const [startH, startM] = schedule.startTime.split(":").map(Number);
+        const meetingStart = new Date(targetDate);
+        meetingStart.setHours(startH, startM, 0, 0);
 
-//         const duration = calculateDuration(schedule.startTime, schedule.endTime);
+        const duration = calculateDuration(schedule.startTime, schedule.endTime);
 
-//         let zoomToken;
-//         try {
-//           zoomToken = await getValidZoomToken(coach.user);
-//         } catch (err) {
-//           console.error(`Zoom token refresh failed for coach ${coach.user}`, err);
-//           continue;
-//         }
+        let zoomToken;
+        try {
+          zoomToken = await getValidZoomToken(coach.user);
+        } catch (err) {
+          console.error(`Zoom token refresh failed for coach ${coach.user}`, err);
+          continue;
+        }
 
-//         let zoomRes;
-//         try {
-//           zoomRes = await axios.post(
-//             `https://api.zoom.us/v2/users/${coach.zoomUserId}/meetings`,
-//             {
-//               topic: "Fitness Coaching Session",
-//               type: 2,
-//               start_time: meetingStart.toISOString(),
-//               duration,
-//               settings: { join_before_host: true },
-//             },
-//             {
-//               headers: {
-//                 Authorization: `Bearer ${zoomToken}`,
-//                 "Content-Type": "application/json",
-//               },
-//             }
-//           );
-//         } catch (err) {
-//           console.error(`Zoom meeting creation failed for coach ${coach.user}`, err.response?.data || err);
-//           continue;
-//         }
+        let zoomRes;
+        try {
+          zoomRes = await axios.post(
+            `https://api.zoom.us/v2/users/${coach.zoomUserId}/meetings`,
+            {
+              topic: "Fitness Coaching Session",
+              type: 2,
+              start_time: meetingStart.toISOString(),
+              duration,
+              settings: { join_before_host: true },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${zoomToken}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+        } catch (err) {
+          console.error(`Zoom meeting creation failed for coach ${coach.user}`, err.response?.data || err);
+          continue;
+        }
 
-//         const clients = await UserSubscription.find({
-//           coach: sub.coach,
-//           isActive: true,
-//           startDate: { $lte: targetDate },
-//           endDate: { $gte: targetDate },
-//         }).select("client");
+        const clients = await UserSubscription.find({
+          coach: sub.coach,
+          isActive: true,
+          startDate: { $lte: targetDate },
+          endDate: { $gte: targetDate },
+        }).select("client");
 
-//         for (const client of clients) {
-//           try {
-//             await Session.create({
-//               user: client.client,
-//               coach: sub.coach,
-//               date: targetDate,
-//               startTime: schedule.startTime,
-//               endTime: schedule.endTime,
-//               zoomJoinUrl: zoomRes.data.join_url,
-//               zoomMeetingId: zoomRes.data.id,
-//             });
+        for (const client of clients) {
+          try {
+            await Session.create({
+              user: client.client,
+              coach: sub.coach,
+              date: targetDate,
+              startTime: schedule.startTime,
+              endTime: schedule.endTime,
+              zoomJoinUrl: zoomRes.data.join_url,
+              zoomMeetingId: zoomRes.data.id,
+              monthlyFee: coachProfile.monthlyFee || 0,
+              currency: coachProfile.currency || 'INR',
+            });
 
-//             console.log(`✅ Created session for user ${client.client} with coach ${sub.coach} on ${targetDate.toDateString()}`);
-//           } catch (err) {
-//             console.error(`❌ Failed to create session for user ${client.client}`, err.message || err);
-//           }
-//         }
-//       }
-//     }
+            console.log(`✅ Created session for user ${client.client} with coach ${sub.coach} on ${targetDate.toDateString()}`);
+          } catch (err) {
+            console.error(`❌ Failed to create session for user ${client.client}`, err.message || err);
+          }
+        }
+      }
+    }
 
-//     console.log("✅ Zoom session cron job completed.");
-//   } catch (err) {
-//     console.error("🔥 Cron job critical error:", err?.response?.data || err);
-//   }
-// });
+    console.log("✅ Zoom session cron job completed.");
+  } catch (err) {
+    console.error("🔥 Cron job critical error:", err?.response?.data || err);
+  }
+});
 
 
 // Helper: calculate duration in minutes
@@ -457,12 +478,12 @@ function calculateDuration(startTime, endTime) {
 
 // Helper: Get valid Zoom token, refresh if expired
 async function getValidZoomToken(userId) {
-  const coach = await Coach.findOne({ user: userId });
-  if (!coach) throw new Error("Coach not found");
+  const coachZoom = await CoachZoom.findOne({ user: userId });
+  if (!coachZoom) throw new Error("Coach Zoom not found");
 
   const now = new Date();
-  if (coach.zoomTokenExpiry && coach.zoomTokenExpiry > now) {
-    return coach.zoomAccessToken;
+  if (coachZoom.zoomTokenExpiry && coachZoom.zoomTokenExpiry > now) {
+    return coachZoom.zoomAccessToken;
   }
 
   const clientId = process.env.ZOOM_CLIENT_ID;
@@ -481,10 +502,10 @@ async function getValidZoomToken(userId) {
   );
 
   const { access_token, refresh_token, expires_in } = response.data;
-  coach.zoomAccessToken = access_token;
-  coach.zoomRefreshToken = refresh_token;
-  coach.zoomTokenExpiry = new Date(Date.now() + expires_in * 1000);
-  await coach.save();
+  coachZoom.zoomAccessToken = access_token;
+  coachZoom.zoomRefreshToken = refresh_token;
+  coachZoom.zoomTokenExpiry = new Date(Date.now() + expires_in * 1000);
+  await coachZoom.save();
 
   return access_token;
 }
@@ -559,8 +580,9 @@ async function generateZoomSessions() {
         continue;
       }
 
-      const coach = await Coach.findOne({ user: sub.coach });
-      if (!coach || !coach.zoomRefreshToken || !coach.zoomUserId) {
+      const coachProfile = await CoachProfile.findOne({ user: sub.coach });
+      const coachZoom = await CoachZoom.findOne({ user: sub.coach });
+      if (!coachProfile || !coachZoom || !coachZoom.zoomRefreshToken || !coachZoom.zoomUserId) {
         console.warn(`⚠️ Missing Zoom credentials for coach ${sub.coach}`);
         continue;
       }
@@ -612,6 +634,8 @@ async function generateZoomSessions() {
           endTime: schedule.endTime,
           zoomJoinUrl: zoomRes.data.join_url,
           zoomMeetingId: zoomRes.data.id,
+          monthlyFee: coachProfile.monthlyFee || 0,
+          currency: coachProfile.currency || 'INR',
         });
 
         createdCount++;
@@ -681,7 +705,7 @@ exports.zoomCallback = async (req, res) => {
 
     console.log("access_token:", access_token," refresh_token:", refresh_token)
 
- const updateAuth = await Coach.findOneAndUpdate(
+ const updateAuth = await CoachZoom.findOneAndUpdate(
   { user: userId },
   {
     user: userId, // required for upsert to create new doc
@@ -689,6 +713,8 @@ exports.zoomCallback = async (req, res) => {
     zoomRefreshToken: refresh_token,
     zoomTokenExpiry: new Date(Date.now() + expires_in * 1000),
     zoomUserId,
+    isConnected: true,
+    lastConnectedAt: new Date()
   },
   { new: true, upsert: true }
 );
@@ -707,8 +733,8 @@ exports.zoomCallback = async (req, res) => {
 
 // ========== CHECK ZOOM CONNECTION STATUS ==========
 exports.getZoomConnectionStatus = async (req, res) => {
-  const coach = await Coach.findOne({ user: req.user.id });
-  if (!coach || !coach.zoomUserId) {
+  const coachZoom = await CoachZoom.findOne({ user: req.user.id });
+  if (!coachZoom || !coachZoom.zoomUserId) {
     return res.status(200).json({ connected: false });
   }
   res.status(200).json({ connected: true });
@@ -721,8 +747,8 @@ exports.disconnectZoom = async (req, res) => {
   try {
     const { id: userId } = req.user;
 
-    const coach = await Coach.findOne({ user: userId });
-    if (!coach || !coach.zoomAccessToken) {
+    const coachZoom = await CoachZoom.findOne({ user: userId });
+    if (!coachZoom || !coachZoom.zoomAccessToken) {
       return res.status(400).json({ success: false, message: "Zoom is not connected" });
     }
 
@@ -744,7 +770,7 @@ exports.disconnectZoom = async (req, res) => {
       console.warn("Zoom token revoke failed (may be already expired):", revokeErr.response?.data || revokeErr.message);
     }
 
-  const updateAuth = await Coach.findOneAndUpdate(
+  const updateAuth = await CoachZoom.findOneAndUpdate(
       { user: userId },
       {
         $unset: {
@@ -753,6 +779,9 @@ exports.disconnectZoom = async (req, res) => {
           zoomTokenExpiry: "",
           zoomUserId: "",
         },
+        $set: {
+          isConnected: false
+        }
       },
       { new: true }
     );
@@ -791,7 +820,13 @@ exports.createCoachSchedule = async (req, res) => {
       await CoachSchedule.findByIdAndUpdate(existing._id, { days, startTime, endTime });
       return res.status(200).json({ success: true, message: 'Schedule updated successfully' });
     } else {
-      await CoachSchedule.create({ coach: coachId, days, startTime, endTime });
+      await CoachSchedule.create({ 
+        coach: coachId, 
+        days, 
+        startTime, 
+        endTime,
+        title: 'Coaching Session' // Distinguish from sales schedules
+      });
       return res.status(201).json({ success: true, message: 'Schedule created successfully' });
     }
   } catch (err) {
@@ -835,3 +870,1012 @@ exports.editCoachSchedule = async (req, res) => {
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
+
+// ===================== COACH PROFILE MANAGEMENT =====================
+
+// Get coach profile
+exports.getCoachProfile = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    const coach = await User.findById(userId)
+      .populate('additionalInfo', 'name email profilePicture bio experience')
+      .select('-password');
+
+    if (!coach) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coach profile not found.',
+      });
+    }
+
+    // Get coach profile with fee information
+    const coachProfile = await CoachProfile.findOne({ user: userId });
+
+    // Get coach schedule
+    const schedule = await CoachSchedule.findOne({ coach: userId });
+
+    // Get active subscriptions count
+    const activeSubscriptions = await UserSubscription.countDocuments({
+      coach: userId,
+      isActive: true
+    });
+
+    // Get total sessions conducted
+    const totalSessions = await Session.countDocuments({
+      coach: userId
+    });
+
+    // Get this month's sessions
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const thisMonthSessions = await Session.countDocuments({
+      coach: userId,
+      date: { $gte: startOfMonth }
+    });
+
+    res.status(200).json({
+      success: true,
+      coach: {
+        ...coach.toObject(),
+        monthlyFee: coachProfile?.monthlyFee || 0,
+        currency: coachProfile?.currency || 'INR',
+        specialization: coachProfile?.specialization || [],
+        certification: coachProfile?.certification || [],
+        rating: coachProfile?.rating || 0,
+        totalSessions: coachProfile?.totalSessions || 0,
+        totalClients: coachProfile?.totalClients || 0,
+        isActive: coachProfile?.isActive !== false,
+        schedule,
+        stats: {
+          activeSubscriptions,
+          totalSessions,
+          thisMonthSessions
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching coach profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Update coach profile
+exports.updateCoachProfile = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+    const { name, email, bio, experience, monthlyFee, currency, specialization } = req.body;
+
+    // Validation
+    const { error } = updateCoachProfileValidation({ name, email, bio, experience });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: error.details.map(e => e.message),
+      });
+    }
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    const coach = await User.findById(userId);
+    if (!coach) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coach profile not found.',
+      });
+    }
+
+    // Update additional info
+    if (coach.additionalInfo) {
+      const updateData = {};
+      if (name) updateData.name = name;
+      if (email) updateData.email = email;
+      if (bio !== undefined) updateData.bio = bio;
+      if (experience !== undefined) updateData.experience = experience;
+
+      await UserAdditionalInfo.findByIdAndUpdate(coach.additionalInfo, updateData);
+    }
+
+    // Update or create CoachProfile
+    const coachProfileUpdate = {};
+    if (bio !== undefined) coachProfileUpdate.bio = bio;
+    if (experience !== undefined) coachProfileUpdate.experience = experience;
+    if (specialization !== undefined) coachProfileUpdate.specialization = specialization;
+    if (monthlyFee !== undefined) coachProfileUpdate.monthlyFee = monthlyFee;
+    if (currency !== undefined) coachProfileUpdate.currency = currency;
+
+    if (Object.keys(coachProfileUpdate).length > 0) {
+      await CoachProfile.findOneAndUpdate(
+        { user: userId },
+        coachProfileUpdate,
+        { new: true, upsert: true }
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating coach profile:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== COACH DASHBOARD =====================
+
+// Get coach dashboard data
+exports.getCoachDashboard = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    // Get active subscriptions
+    const activeSubscriptions = await UserSubscription.countDocuments({
+      coach: userId,
+      isActive: true
+    });
+
+    // Get total sessions conducted
+    const totalSessions = await Session.countDocuments({
+      coach: userId
+    });
+
+    // Get this month's sessions
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const thisMonthSessions = await Session.countDocuments({
+      coach: userId,
+      date: { $gte: startOfMonth }
+    });
+
+    // Get today's sessions
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todaysSessions = await Session.countDocuments({
+      coach: userId,
+      date: { $gte: today, $lt: tomorrow }
+    });
+
+    // Get upcoming sessions (next 7 days)
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+
+    const upcomingSessions = await Session.find({
+      coach: userId,
+      date: { $gte: today, $lte: nextWeek }
+    }).populate('users', 'additionalInfo')
+      .select('date startTime endTime users')
+      .sort('date');
+
+    // Get recent clients (last 5)
+    const recentClients = await UserSubscription.find({
+      coach: userId,
+      isActive: true
+    })
+      .populate({
+        path: 'client',
+        select: 'additionalInfo',
+        populate: {
+          path: 'additionalInfo',
+          select: 'name email'
+        }
+      })
+      .sort('-createdAt')
+      .limit(5);
+
+    // Calculate estimated revenue
+    const estimatedRevenue = activeSubscriptions * 1000; // Adjust based on your pricing
+
+    res.status(200).json({
+      success: true,
+      dashboard: {
+        stats: {
+          activeSubscriptions,
+          totalSessions,
+          thisMonthSessions,
+          todaysSessions,
+          estimatedRevenue
+        },
+        upcomingSessions: upcomingSessions.map(session => ({
+          date: session.date.toDateString(),
+          time: `${session.startTime} - ${session.endTime}`,
+          clientCount: session.users.length
+        })),
+        recentClients: recentClients.map(sub => ({
+          name: sub.client.additionalInfo?.name || 'Unknown',
+          email: sub.client.additionalInfo?.email || '',
+          subscriptionDate: sub.startDate
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching coach dashboard:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== COACH ANALYTICS =====================
+
+// Get coach analytics
+exports.getCoachAnalytics = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    // Get all subscriptions for this coach
+    const subscriptions = await UserSubscription.find({
+      coach: userId
+    }).populate({
+      path: 'client',
+      select: 'additionalInfo',
+      populate: {
+        path: 'additionalInfo',
+        select: 'name email'
+      }
+    });
+
+    // Get all sessions for this coach
+    const sessions = await Session.find({
+      coach: userId
+    }).populate('users', 'additionalInfo');
+
+    // Calculate monthly data for the last 6 months
+    const monthlyData = [];
+    for (let i = 5; i >= 0; i--) {
+      const startOfMonth = new Date();
+      startOfMonth.setMonth(startOfMonth.getMonth() - i);
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+
+      const endOfMonth = new Date(startOfMonth);
+      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+      endOfMonth.setDate(0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      const monthSubscriptions = subscriptions.filter(sub => 
+        sub.startDate >= startOfMonth && sub.startDate <= endOfMonth
+      );
+
+      const monthSessions = sessions.filter(session => 
+        session.date >= startOfMonth && session.date <= endOfMonth
+      );
+
+      monthlyData.push({
+        month: startOfMonth.toLocaleDateString('en-US', { year: 'numeric', month: 'long' }),
+        newSubscriptions: monthSubscriptions.length,
+        sessionsConducted: monthSessions.length,
+        estimatedRevenue: monthSubscriptions.length * 1000
+      });
+    }
+
+    // Get client retention data
+    const totalClients = subscriptions.length;
+    const activeClients = subscriptions.filter(sub => sub.isActive).length;
+    const retentionRate = totalClients > 0 ? (activeClients / totalClients) * 100 : 0;
+
+    res.status(200).json({
+      success: true,
+      analytics: {
+        summary: {
+          totalSubscriptions: totalClients,
+          activeSubscriptions: activeClients,
+          totalSessions: sessions.length,
+          retentionRate: Math.round(retentionRate * 100) / 100,
+          totalEstimatedRevenue: totalClients * 1000
+        },
+        monthlyData
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching coach analytics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== SESSION MANAGEMENT =====================
+
+// Get session details
+exports.getSessionDetails = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+    const { sessionId } = req.params;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    const session = await Session.findById(sessionId)
+      .populate('users', 'additionalInfo')
+      .where('coach').equals(userId);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found.',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      session: {
+        id: session._id,
+        date: session.date.toDateString(),
+        time: `${session.startTime} - ${session.endTime}`,
+        zoomJoinUrl: session.zoomJoinUrl,
+        zoomMeetingId: session.zoomMeetingId,
+        clients: session.users.map(user => ({
+          id: user._id,
+          name: user.additionalInfo?.name || 'Unknown',
+          email: user.additionalInfo?.email || ''
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching session details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Cancel a session
+exports.cancelSession = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+    const { sessionId } = req.params;
+    const { reason } = req.body;
+
+    // Validation
+    const { error } = cancelSessionValidation({ reason });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: error.details.map(e => e.message),
+      });
+    }
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    const session = await Session.findById(sessionId)
+      .where('coach').equals(userId);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found.',
+      });
+    }
+
+    // Check if session is in the future
+    if (session.date <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel past or ongoing sessions.',
+      });
+    }
+
+    // Delete the session
+    await Session.findByIdAndDelete(sessionId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Session cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Error cancelling session:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+
+
+// ===================== CLIENT MANAGEMENT =====================
+
+// Get client details
+exports.getClientDetails = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+    const { clientId } = req.params;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    // Check if client is subscribed to this coach
+    const subscription = await UserSubscription.findOne({
+      coach: userId,
+      client: clientId,
+      isActive: true
+    }).populate({
+      path: 'client',
+      select: 'phone additionalInfo',
+      populate: {
+        path: 'additionalInfo',
+        select: 'name email'
+      }
+    });
+
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client not found or not subscribed.',
+      });
+    }
+
+    // Get client's sessions with this coach
+    const sessions = await Session.find({
+      coach: userId,
+      users: clientId
+    }).select('date startTime endTime')
+      .sort('-date')
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      client: {
+        id: subscription.client._id,
+        name: subscription.client.additionalInfo?.name || 'Unknown',
+        email: subscription.client.additionalInfo?.email || '',
+        phone: subscription.client.phone,
+        subscriptionStart: subscription.startDate,
+        subscriptionEnd: subscription.endDate,
+        recentSessions: sessions.map(session => ({
+          date: session.date.toDateString(),
+          time: `${session.startTime} - ${session.endTime}`
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching client details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== COACH NOTIFICATIONS =====================
+
+// Get coach notifications
+exports.getCoachNotifications = async (req, res) => {
+  try {
+    const { id: userId, role } = req.user;
+
+    if (role !== 'coach') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Only coaches can access this resource.',
+      });
+    }
+
+    // Get today's sessions
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todaysSessions = await Session.countDocuments({
+      coach: userId,
+      date: { $gte: today, $lt: tomorrow }
+    });
+
+    // Get new subscriptions in last 7 days
+    const lastWeek = new Date();
+    lastWeek.setDate(lastWeek.getDate() - 7);
+
+    const newSubscriptions = await UserSubscription.countDocuments({
+      coach: userId,
+      startDate: { $gte: lastWeek }
+    });
+
+    // Get upcoming sessions in next 24 hours
+    const next24Hours = new Date();
+    next24Hours.setHours(next24Hours.getHours() + 24);
+
+    const upcomingSessions = await Session.countDocuments({
+      coach: userId,
+      date: { $gte: new Date(), $lte: next24Hours }
+    });
+
+    res.status(200).json({
+      success: true,
+      notifications: {
+        todaysSessions,
+        newSubscriptions,
+        upcomingSessions,
+        hasNotifications: (todaysSessions > 0 || newSubscriptions > 0 || upcomingSessions > 0)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== IN-APP PURCHASE CONTROLLERS =====================
+
+// Verify Apple App Store receipt and create subscription
+exports.verifyAppleReceipt = async (req, res) => {
+  try {
+    const { receiptData, productId, transactionId, userId, coachId } = req.body;
+
+    // Validate required fields
+    if (!receiptData || !productId || !transactionId || !userId || !coachId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: receiptData, productId, transactionId, userId, coachId'
+      });
+    }
+
+    // TODO: Implement Apple receipt verification
+    // This would typically involve calling Apple's verification API
+    const isReceiptValid = await verifyAppleReceiptWithApple(receiptData);
+
+    if (!isReceiptValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid receipt'
+      });
+    }
+
+    // Get coach profile for fee information
+    const coachProfile = await CoachProfile.findOne({ user: coachId });
+    if (!coachProfile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coach profile not found'
+      });
+    }
+
+    // Get product information
+    const product = await InAppProduct.findOne({ 'appleProduct.productId': productId });
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Create subscription
+    const subscription = await UserSubscription.create({
+      client: userId,
+      coach: coachId,
+      platform: 'ios',
+      monthlyFee: coachProfile.monthlyFee,
+      currency: coachProfile.currency,
+      startDate: new Date(),
+      endDate: new Date(Date.now() + product.subscriptionDetails.duration * 24 * 60 * 60 * 1000),
+      sessionsPerMonth: product.subscriptionDetails.sessionsPerMonth,
+      paymentStatus: 'completed',
+      receiptVerified: true,
+      receiptVerifiedAt: new Date(),
+      platformSubscriptionStatus: 'active',
+      autoRenewStatus: product.subscriptionDetails.autoRenewable,
+      applePurchase: {
+        transactionId,
+        productId,
+        receiptData,
+        environment: process.env.NODE_ENV === 'production' ? 'Production' : 'Sandbox',
+        bundleId: product.appleProduct.bundleId
+      },
+      metadata: {
+        purchaseSource: 'app_store',
+        deviceId: req.body.deviceId,
+        appVersion: req.body.appVersion,
+        osVersion: req.body.osVersion
+      }
+    });
+
+    // Update product statistics
+    await InAppProduct.findByIdAndUpdate(product._id, {
+      $inc: {
+        'stats.totalPurchases': 1,
+        'stats.activeSubscriptions': 1,
+        'stats.totalRevenue': coachProfile.monthlyFee
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Subscription created successfully',
+      subscription: {
+        id: subscription._id,
+        platform: subscription.platform,
+        monthlyFee: subscription.monthlyFee,
+        currency: subscription.currency,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        sessionsPerMonth: subscription.sessionsPerMonth,
+        paymentStatus: subscription.paymentStatus,
+        receiptVerified: subscription.receiptVerified,
+        autoRenewStatus: subscription.autoRenewStatus
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verifying Apple receipt:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Verify Google Play purchase and create subscription
+exports.verifyGooglePurchase = async (req, res) => {
+  try {
+    const { purchaseToken, productId, orderId, userId, coachId, packageName } = req.body;
+
+    // Validate required fields
+    if (!purchaseToken || !productId || !userId || !coachId || !packageName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: purchaseToken, productId, userId, coachId, packageName'
+      });
+    }
+
+    // TODO: Implement Google Play purchase verification
+    // This would typically involve calling Google Play Developer API
+    const isPurchaseValid = await verifyGooglePurchaseWithGoogle(purchaseToken, productId, packageName);
+
+    if (!isPurchaseValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid purchase'
+      });
+    }
+
+    // Get coach profile for fee information
+    const coachProfile = await CoachProfile.findOne({ user: coachId });
+    if (!coachProfile) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coach profile not found'
+      });
+    }
+
+    // Get product information
+    const product = await InAppProduct.findOne({ 'googleProduct.productId': productId });
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Create subscription
+    const subscription = await UserSubscription.create({
+      client: userId,
+      coach: coachId,
+      platform: 'android',
+      monthlyFee: coachProfile.monthlyFee,
+      currency: coachProfile.currency,
+      startDate: new Date(),
+      endDate: new Date(Date.now() + product.subscriptionDetails.duration * 24 * 60 * 60 * 1000),
+      sessionsPerMonth: product.subscriptionDetails.sessionsPerMonth,
+      paymentStatus: 'completed',
+      receiptVerified: true,
+      receiptVerifiedAt: new Date(),
+      platformSubscriptionStatus: 'active',
+      autoRenewStatus: product.subscriptionDetails.autoRenewable,
+      googlePurchase: {
+        purchaseToken,
+        orderId,
+        productId,
+        packageName,
+        purchaseTime: new Date(),
+        purchaseState: 1, // 1 = purchased
+        isAcknowledged: true,
+        isAutoRenewing: product.subscriptionDetails.autoRenewable,
+        purchaseType: 'subscription'
+      },
+      metadata: {
+        purchaseSource: 'play_store',
+        deviceId: req.body.deviceId,
+        appVersion: req.body.appVersion,
+        osVersion: req.body.osVersion
+      }
+    });
+
+    // Update product statistics
+    await InAppProduct.findByIdAndUpdate(product._id, {
+      $inc: {
+        'stats.totalPurchases': 1,
+        'stats.activeSubscriptions': 1,
+        'stats.totalRevenue': coachProfile.monthlyFee
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Subscription created successfully',
+      subscription: {
+        id: subscription._id,
+        platform: subscription.platform,
+        monthlyFee: subscription.monthlyFee,
+        currency: subscription.currency,
+        startDate: subscription.startDate,
+        endDate: subscription.endDate,
+        sessionsPerMonth: subscription.sessionsPerMonth,
+        paymentStatus: subscription.paymentStatus,
+        receiptVerified: subscription.receiptVerified,
+        autoRenewStatus: subscription.autoRenewStatus
+      }
+    });
+
+  } catch (error) {
+    console.error('Error verifying Google purchase:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Get user's active subscriptions
+exports.getUserSubscriptions = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const subscriptions = await UserSubscription.find({
+      client: userId,
+      isActive: true
+    })
+      .populate('coach', 'phone')
+      .populate({
+        path: 'coach',
+        populate: {
+          path: 'additionalInfo',
+          select: 'name email'
+        }
+      });
+
+    const activeSubscriptions = subscriptions.filter(sub => sub.isValid);
+
+    res.status(200).json({
+      success: true,
+      count: activeSubscriptions.length,
+      subscriptions: activeSubscriptions.map(sub => ({
+        id: sub._id,
+        coach: sub.coach,
+        platform: sub.platform,
+        monthlyFee: sub.monthlyFee,
+        currency: sub.currency,
+        startDate: sub.startDate,
+        endDate: sub.endDate,
+        sessionsPerMonth: sub.sessionsPerMonth,
+        sessionsUsed: sub.sessionsUsed,
+        paymentStatus: sub.paymentStatus,
+        receiptVerified: sub.receiptVerified,
+        autoRenewStatus: sub.autoRenewStatus,
+        platformSubscriptionStatus: sub.platformSubscriptionStatus,
+        isValid: sub.isValid
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching user subscriptions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Cancel in-app purchase subscription
+exports.cancelInAppSubscription = async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const { reason } = req.body;
+
+    const subscription = await UserSubscription.findById(subscriptionId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    // Update subscription status
+    subscription.isActive = false;
+    subscription.paymentStatus = 'cancelled';
+    subscription.platformSubscriptionStatus = 'cancelled';
+    subscription.notes = reason || 'Cancelled by user';
+    await subscription.save();
+
+    // Update product statistics
+    const product = await InAppProduct.findOne({
+      $or: [
+        { 'appleProduct.productId': subscription.applePurchase?.productId },
+        { 'googleProduct.productId': subscription.googlePurchase?.productId }
+      ]
+    });
+
+    if (product) {
+      await InAppProduct.findByIdAndUpdate(product._id, {
+        $inc: { 'stats.activeSubscriptions': -1 }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Subscription cancelled successfully',
+      subscription: {
+        id: subscription._id,
+        isActive: subscription.isActive,
+        paymentStatus: subscription.paymentStatus,
+        platformSubscriptionStatus: subscription.platformSubscriptionStatus
+      }
+    });
+
+  } catch (error) {
+    console.error('Error cancelling subscription:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// Get available products for a coach
+exports.getCoachProducts = async (req, res) => {
+  try {
+    const { coachId } = req.params;
+    const { platform } = req.query; // 'ios', 'android', or both
+
+    let query = { isActive: true };
+    
+    if (coachId) {
+      query.$or = [
+        { coach: coachId },
+        { isGlobal: true }
+      ];
+    }
+
+    if (platform) {
+      if (platform === 'ios') {
+        query['platformStatus.apple'] = 'active';
+      } else if (platform === 'android') {
+        query['platformStatus.google'] = 'active';
+      }
+    }
+
+    const products = await InAppProduct.find(query)
+      .populate('coach', 'phone')
+      .populate({
+        path: 'coach',
+        populate: {
+          path: 'additionalInfo',
+          select: 'name email'
+        }
+      });
+
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      products: products.map(product => ({
+        id: product._id,
+        name: product.name,
+        description: product.description,
+        productType: product.productType,
+        subscriptionDetails: product.subscriptionDetails,
+        pricing: product.pricing,
+        platformInfo: product.platformInfo,
+        isAvailable: product.isAvailable,
+        coach: product.coach,
+        isGlobal: product.isGlobal,
+        category: product.metadata?.category
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching coach products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ===================== UTILITY FUNCTIONS =====================
+
+// Verify Apple receipt with Apple's servers
+async function verifyAppleReceiptWithApple(receiptData) {
+  // TODO: Implement actual Apple receipt verification
+  // This would involve:
+  // 1. Sending receipt data to Apple's verification endpoint
+  // 2. Checking the response for validity
+  // 3. Verifying the product ID and transaction details
+  
+  // For now, return true (mock implementation)
+  return true;
+}
+
+// Verify Google Play purchase with Google's servers
+async function verifyGooglePurchaseWithGoogle(purchaseToken, productId, packageName) {
+  // TODO: Implement actual Google Play purchase verification
+  // This would involve:
+  // 1. Using Google Play Developer API
+  // 2. Verifying the purchase token
+  // 3. Checking the product ID and package name
+  
+  // For now, return true (mock implementation)
+  return true;
+}

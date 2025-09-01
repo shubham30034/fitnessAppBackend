@@ -2,10 +2,13 @@ const CalorieRecord = require("../../Model/calorieModel/caloriesRecorder");
 const Calorie = require("../../Model/calorieModel/calorieModel");
 const { fetchNutritionFromAI } = require("../../services/nutritionSection/aiNutrition");
 
-// Helper to get YYYY-MM-DD string for today
+// Helper to get YYYY-MM-DD string for today in local timezone to match model validation
 const getTodayDateString = () => {
   const today = new Date();
-  return today.toISOString().split("T")[0];
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 // Helper to get next midnight (start of next day)

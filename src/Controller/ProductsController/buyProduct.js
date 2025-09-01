@@ -40,7 +40,9 @@ exports.buyProduct = async (req, res) => {
       totalPrice: amount,
       address,
       status: "Pending",
-      paymentStatus: "Pending"
+      paymentStatus: "Pending",
+      razorpayOrderId: razorpayOrder.id,
+      razorpayReceipt: razorpayOrder.receipt
     });
 
     res.status(201).json({
@@ -64,27 +66,28 @@ exports.checkoutFromCart = async (req, res) => {
       return res.status(400).json({ success: false, message: "Address is required" });
     }
 
-    const cartItems = await Cart.find({ userId }).populate("productId");
-    if (!cartItems.length) {
+    // Load user's cart
+    const cart = await Cart.findOne({ user: userId }).populate("items.product");
+    if (!cart || cart.items.length === 0) {
       return res.status(400).json({ success: false, message: "Cart is empty" });
     }
 
     const products = [];
     let totalPrice = 0;
 
-    for (const item of cartItems) {
-      const product = item.productId;
-      if (!product || !product.isActive || product.quantity < item.quantity) {
+    for (const cartItem of cart.items) {
+      const product = cartItem.product;
+      if (!product || !product.isActive || product.quantity < cartItem.quantity) {
         return res.status(400).json({ success: false, message: `Product unavailable or insufficient stock: ${product?.name}` });
       }
 
       products.push({
         productId: product._id,
-        quantity: item.quantity,
+        quantity: cartItem.quantity,
         price: product.price
       });
 
-      totalPrice += product.price * item.quantity;
+      totalPrice += product.price * cartItem.quantity;
     }
 
     const razorpayOrder = await instance.orders.create({
@@ -100,10 +103,14 @@ exports.checkoutFromCart = async (req, res) => {
       totalPrice,
       address,
       status: "Pending",
-      paymentStatus: "Pending"
+      paymentStatus: "Pending",
+      razorpayOrderId: razorpayOrder.id,
+      razorpayReceipt: razorpayOrder.receipt
     });
 
-    await Cart.deleteMany({ userId });
+    // Clear the user's cart after creating the order
+    cart.items = [];
+    await cart.save();
 
     res.status(201).json({
       success: true,
@@ -118,21 +125,25 @@ exports.checkoutFromCart = async (req, res) => {
 
 // ✅ 3. Razorpay Webhook Verification
 exports.verifySignature = async (req, res) => {
-  const webhookSecret = "12345678";
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers["x-razorpay-signature"];
 
   const shasum = crypto.createHmac("sha256", webhookSecret);
-  shasum.update(JSON.stringify(req.body));
+  // Use rawBody if attached by middleware to avoid JSON re-serialization issues
+  const payload = req.rawBody ? req.rawBody : Buffer.from(JSON.stringify(req.body));
+  shasum.update(payload);
   const digest = shasum.digest("hex");
 
   if (signature === digest) {
     console.log("🔐 Payment authorized");
 
-    const { userId } = req.body.payload.payment.entity.notes;
+    const { userId } = req.body.payload.payment.entity.notes || {};
+    const paymentOrderId = req.body.payload?.payment?.entity?.order_id; // Razorpay order id
 
     try {
+      // Match the pending order using a robust criteria. Prefer matching by Razorpay order id stored in receipt if available.
       const order = await Order.findOneAndUpdate(
-        { userId, paymentStatus: "Pending" },
+        { userId, paymentStatus: "Pending", razorpayOrderId: paymentOrderId },
         { paymentStatus: "Paid", status: "Confirmed" },
         { new: true }
       );

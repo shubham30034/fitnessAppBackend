@@ -42,7 +42,6 @@ exports.getAllExercisesFromJson = async (req, res) => {
 };
 
 
-
 exports.getAllExercises = async (req, res) => {
     try {
         // Get page and limit from request body (or default values)

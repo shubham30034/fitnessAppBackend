@@ -12,12 +12,16 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'coach', 'superadmin', 'admin', 'seller'],
+    enum: ['user', 'coach', 'superadmin', 'admin', 'seller', 'coachmanager'],
     default: 'user',
     required: true,
   },
   password: {
     type: String, // Only required for coach, seller, etc.
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
   },
   createdAt: {
     type: Date,

@@ -18,7 +18,14 @@ const userAdditionalInfoSchema = new mongoose.Schema({
     type: String,
   },
   profilePicture: {
-   type: String,
+    type: String,
+  },
+  profilePictureSizes: {
+    thumbnail: String,
+    small: String,
+    medium: String,
+    large: String,
+    original: String
   },
   createdAt: {
     type: Date,

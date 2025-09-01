@@ -1,7 +1,7 @@
 const { Server } = require('socket.io');
 const ChatRoom = require('../Model/paidSessionModel/chatSection/chatRoom');
 const Message = require('../Model/paidSessionModel/chatSection/message');
-const UserSubscription = require('../Model/paidSessionModel/userBookingCoach');
+const UserSubscription = require('../Model/paidSessionModel/userSubscription');
 
 function setupSocket(server) {
   const io = new Server(server, {

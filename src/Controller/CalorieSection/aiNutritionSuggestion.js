@@ -195,12 +195,8 @@ Respond ONLY with raw, valid JSON. Do NOT include explanations, comments, markdo
 // Helper: call AI API to get updated plan JSON
 async function callAIForUpdate(prompt) {
   const data = await openRouter(prompt)
-
-  if(!data){
-    return res.status(400).json({
-      success:false,
-      message:"unable to fetch data from ai"
-    })
+  if (!data) {
+    throw new Error("Unable to fetch data from AI");
   }
 
 
