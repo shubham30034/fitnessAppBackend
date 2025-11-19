@@ -106,9 +106,13 @@ exports.createCoach = async (req, res) => {
 // Get all coaches
 exports.getAllCoaches = async (req, res) => {
   try {
+    console.log('getAllCoaches called');
     const coaches = await User.find({ role: 'coach' })
       .populate('additionalInfo', 'name email')
       .select('-password');
+
+    console.log('Found coaches:', coaches.length);
+    console.log('First coach:', coaches[0]);
 
     res.status(200).json({
       success: true,
@@ -284,9 +288,14 @@ exports.getCoachStudents = async (req, res) => {
       });
     }
 
+    // Get current date for expiration check
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
+    
     const subscriptions = await UserSubscription.find({
       coach: coachId,
-      isActive: true
+      isActive: true,
+      endDate: { $gte: today } // Only include subscriptions that haven't expired yet
     })
       .populate({
         path: 'client',
@@ -322,25 +331,93 @@ exports.getCoachStudents = async (req, res) => {
 // Get all students across all coaches
 exports.getAllStudents = async (req, res) => {
   try {
+    console.log('Getting all students...');
+    
+    // First check total subscriptions count
+    const totalSubscriptions = await UserSubscription.countDocuments();
+    console.log('Total subscriptions in database:', totalSubscriptions);
+    
+    const activeSubscriptions = await UserSubscription.countDocuments({ isActive: true });
+    console.log('Active subscriptions in database:', activeSubscriptions);
+    
+    // Get current date for expiration check
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
+    console.log('Current date for expiration check:', today.toISOString());
+    
+    // Check for expired but still active subscriptions
+    const expiredButActive = await UserSubscription.countDocuments({
+      isActive: true,
+      endDate: { $lt: today }
+    });
+    console.log('Expired but still active subscriptions:', expiredButActive);
+    
     const subscriptions = await UserSubscription.find({
-      isActive: true
+      isActive: true,
+      endDate: { $gte: today } // Only include subscriptions that haven't expired yet
     })
       .populate({
         path: 'client',
-        select: 'phone role createdAt',
+        select: 'phone role createdAt additionalInfo',
         populate: {
           path: 'additionalInfo',
-          select: 'name email'
+          select: 'name email userId'
         }
       })
       .populate({
         path: 'coach',
-        select: 'phone role',
+        select: 'phone role additionalInfo',
         populate: {
           path: 'additionalInfo',
-          select: 'name email'
+          select: 'name email userId'
         }
       });
+
+    console.log('Found subscriptions:', subscriptions.length);
+    console.log('Raw subscriptions:', JSON.stringify(subscriptions, null, 2));
+    
+    // Debug each subscription individually
+    subscriptions.forEach((sub, index) => {
+      console.log(`\n--- Subscription ${index + 1} ---`);
+      console.log('Subscription ID:', sub._id);
+      console.log('Client (student):', sub.client);
+      console.log('Coach:', sub.coach);
+      console.log('Client additionalInfo:', sub.client?.additionalInfo);
+      console.log('Coach additionalInfo:', sub.coach?.additionalInfo);
+      
+      // Check if additionalInfo exists
+      if (sub.client && !sub.client.additionalInfo) {
+        console.log('WARNING: Client has no additionalInfo populated');
+      }
+      if (sub.coach && !sub.coach.additionalInfo) {
+        console.log('WARNING: Coach has no additionalInfo populated');
+      }
+    });
+
+    // If no active subscriptions found, try to get all subscriptions for debugging
+    let allSubscriptions = [];
+    if (subscriptions.length === 0) {
+      console.log('No active subscriptions found, checking all subscriptions...');
+      allSubscriptions = await UserSubscription.find({})
+        .populate({
+          path: 'client',
+          select: 'phone role createdAt',
+          populate: {
+            path: 'additionalInfo',
+            select: 'name email'
+          }
+        })
+        .populate({
+          path: 'coach',
+          select: 'phone role',
+          populate: {
+            path: 'additionalInfo',
+            select: 'name email'
+          }
+        });
+      console.log('All subscriptions found:', allSubscriptions.length);
+      console.log('All subscriptions data:', JSON.stringify(allSubscriptions, null, 2));
+    }
 
     const students = subscriptions.map(sub => ({
       subscriptionId: sub._id,
@@ -349,6 +426,9 @@ exports.getAllStudents = async (req, res) => {
       student: sub.client,
       coach: sub.coach
     }));
+
+    console.log('Processed students:', students.length);
+    console.log('Processed students data:', JSON.stringify(students, null, 2));
 
     res.status(200).json({
       success: true,
@@ -365,36 +445,266 @@ exports.getAllStudents = async (req, res) => {
   }
 };
 
+// Get inactive/expired subscriptions for analysis
+exports.getInactiveSubscriptions = async (req, res) => {
+  try {
+    console.log('Getting inactive subscriptions for analysis...');
+    
+    // Get current date for expiration check
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    console.log('Current date for expiration check:', today.toISOString());
+    
+    // Get inactive subscriptions (either isActive: false OR expired by date)
+    const inactiveSubscriptions = await UserSubscription.find({
+      $or: [
+        { isActive: false }, // Explicitly inactive
+        { 
+          isActive: true, 
+          endDate: { $lt: today } // Expired but still marked as active
+        }
+      ]
+    })
+      .populate({
+        path: 'client',
+        select: 'phone role createdAt additionalInfo',
+        populate: {
+          path: 'additionalInfo',
+          select: 'name email userId'
+        }
+      })
+      .populate({
+        path: 'coach',
+        select: 'phone role additionalInfo',
+        populate: {
+          path: 'additionalInfo',
+          select: 'name email userId'
+        }
+      })
+      .sort({ endDate: -1 }); // Sort by end date, most recent first
+
+    console.log('Found inactive subscriptions:', inactiveSubscriptions.length);
+    
+    // Process the data for analysis
+    const processedSubscriptions = inactiveSubscriptions.map(sub => {
+      const endDate = new Date(sub.endDate);
+      const isExpired = endDate < today;
+      const daysSinceExpiry = isExpired ? Math.floor((today - endDate) / (1000 * 60 * 60 * 24)) : 0;
+      
+      return {
+        subscriptionId: sub._id,
+        student: {
+          id: sub.client?._id,
+          name: sub.client?.additionalInfo?.name || 'N/A',
+          email: sub.client?.additionalInfo?.email || 'N/A',
+          phone: sub.client?.phone || 'N/A',
+          joinedDate: sub.client?.createdAt
+        },
+        coach: {
+          id: sub.coach?._id,
+          name: sub.coach?.additionalInfo?.name || 'N/A',
+          email: sub.coach?.additionalInfo?.email || 'N/A',
+          phone: sub.coach?.phone || 'N/A'
+        },
+        subscription: {
+          startDate: sub.startDate,
+          endDate: sub.endDate,
+          monthlyFee: sub.monthlyFee,
+          currency: sub.currency,
+          platform: sub.platform,
+          subscriptionType: sub.subscriptionType,
+          sessionsPerMonth: sub.sessionsPerMonth,
+          sessionsUsed: sub.sessionsUsed,
+          paymentStatus: sub.paymentStatus
+        },
+        status: {
+          isActive: sub.isActive,
+          isExpired: isExpired,
+          daysSinceExpiry: daysSinceExpiry,
+          expirationReason: sub.expirationReason || (isExpired ? 'automatic_expiration' : 'manual_cancellation'),
+          expiredAt: sub.expiredAt
+        },
+        analysis: {
+          durationInDays: Math.floor((endDate - new Date(sub.startDate)) / (1000 * 60 * 60 * 24)),
+          totalRevenue: sub.monthlyFee * Math.ceil((endDate - new Date(sub.startDate)) / (1000 * 60 * 60 * 24 * 30)),
+          utilizationRate: sub.sessionsPerMonth > 0 ? (sub.sessionsUsed / sub.sessionsPerMonth) * 100 : 0
+        }
+      };
+    });
+
+    // Calculate summary statistics
+    const totalInactive = processedSubscriptions.length;
+    const expiredByDate = processedSubscriptions.filter(sub => sub.status.isExpired).length;
+    const manuallyCancelled = processedSubscriptions.filter(sub => !sub.status.isExpired && !sub.status.isActive).length;
+    const totalRevenueLost = processedSubscriptions.reduce((sum, sub) => sum + sub.analysis.totalRevenue, 0);
+    const averageUtilization = processedSubscriptions.length > 0 
+      ? processedSubscriptions.reduce((sum, sub) => sum + sub.analysis.utilizationRate, 0) / processedSubscriptions.length 
+      : 0;
+
+    res.status(200).json({
+      success: true,
+      count: totalInactive,
+      summary: {
+        totalInactive,
+        expiredByDate,
+        manuallyCancelled,
+        totalRevenueLost,
+        averageUtilization: Math.round(averageUtilization * 10) / 10
+      },
+      subscriptions: processedSubscriptions
+    });
+  } catch (error) {
+    console.error('Error fetching inactive subscriptions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
 // ===================== FINANCIAL MANAGEMENT =====================
+
 
 // Get financial overview for all coaches
 exports.getFinancialOverview = async (req, res) => {
   try {
-    const coaches = await User.find({ role: 'coach' })
+    console.log('=== getFinancialOverview called ===');
+    console.log('Request headers:', req.headers);
+    console.log('Request query:', req.query);
+    console.log('Request user:', req.user);
+    
+    const { period = 'month', coachId } = req.query;
+    console.log('Query parameters:', { period, coachId });
+    
+    // Build coach filter
+    let coachFilter = { role: 'coach' };
+    if (coachId && coachId !== 'all' && coachId !== 'undefined') {
+      try {
+        // Validate that coachId is a valid ObjectId
+        const mongoose = require('mongoose');
+        if (mongoose.Types.ObjectId.isValid(coachId)) {
+          coachFilter._id = coachId;
+        } else {
+          console.log('Invalid coachId format:', coachId);
+        }
+      } catch (error) {
+        console.log('Error validating coachId:', error);
+      }
+    }
+    
+    console.log('Coach filter:', coachFilter);
+    
+    const coaches = await User.find(coachFilter)
       .populate('additionalInfo', 'name email');
+    
+    console.log('Found coaches for financial overview:', coaches.length);
+    console.log('Coaches data:', coaches.map(c => ({ id: c._id, name: c.additionalInfo?.name, email: c.additionalInfo?.email })));
+    
+    // Check if there are any subscriptions in the database
+    const totalSubscriptions = await UserSubscription.countDocuments();
+    console.log('Total subscriptions in database:', totalSubscriptions);
+    
+    // Show all subscriptions in database for debugging
+    const allSubscriptions = await UserSubscription.find({}).limit(10);
+    console.log('Sample subscriptions in database:', allSubscriptions.map(sub => ({
+      id: sub._id,
+      coach: sub.coach,
+      client: sub.client,
+      monthlyFee: sub.monthlyFee,
+      isActive: sub.isActive,
+      endDate: sub.endDate,
+      paymentStatus: sub.paymentStatus
+    })));
+    
+    // Check if there are any sessions in the database
+    const totalSessions = await Session.countDocuments();
+    console.log('Total sessions in database:', totalSessions);
+    
+    // Show sample sessions in database for debugging
+    const allSessions = await Session.find({}).limit(10);
+    console.log('Sample sessions in database:', allSessions.map(session => ({
+      id: session._id,
+      coach: session.coach,
+      date: session.date,
+      status: session.status,
+      sessionType: session.sessionType
+    })));
 
     const financialData = [];
 
     for (const coach of coaches) {
-      // Get active subscriptions
-      const activeSubscriptions = await UserSubscription.countDocuments({
+      console.log(`Processing coach: ${coach._id} - ${coach.additionalInfo?.name}`);
+      
+      // Get active subscriptions with their fees (already checking endDate)
+      const activeSubscriptionsData = await UserSubscription.find({
         coach: coach._id,
-        isActive: true
+        isActive: true,
+        endDate: { $gte: new Date() }
       });
+      
+      const activeSubscriptions = activeSubscriptionsData.length;
+      const totalSubscriptionRevenue = activeSubscriptionsData.reduce((sum, sub) => sum + (sub.monthlyFee || 0), 0);
+      
+      console.log(`Coach ${coach._id} active subscriptions:`, activeSubscriptions);
+      console.log(`Coach ${coach._id} subscription details:`, activeSubscriptionsData.map(sub => ({
+        id: sub._id,
+        monthlyFee: sub.monthlyFee,
+        isActive: sub.isActive,
+        endDate: sub.endDate,
+        paymentStatus: sub.paymentStatus
+      })));
+      console.log(`Coach ${coach._id} total subscription revenue:`, totalSubscriptionRevenue);
 
       // Get total sessions conducted
       const totalSessions = await Session.countDocuments({
         coach: coach._id
       });
+      console.log(`Coach ${coach._id} total sessions:`, totalSessions);
 
-      // Get this month's sessions
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
+      // Get period-based sessions based on the period parameter
+      let startDate = new Date();
+      let endDate = new Date();
+      
+      switch (period) {
+        case 'week':
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case 'month':
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'quarter':
+          const currentQuarter = Math.floor(startDate.getMonth() / 3);
+          startDate.setMonth(currentQuarter * 3, 1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'year':
+          startDate.setMonth(0, 1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        default:
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+      }
 
-      const thisMonthSessions = await Session.countDocuments({
+      const periodSessions = await Session.countDocuments({
         coach: coach._id,
-        date: { $gte: startOfMonth }
+        date: { $gte: startDate, $lte: endDate }
+      });
+      console.log(`Coach ${coach._id} period sessions (${period}):`, periodSessions, 'Date range:', startDate, 'to', endDate);
+
+      // Calculate revenue - use ONLY actual subscription fees, no fallback to sessions
+      const estimatedRevenue = totalSubscriptionRevenue; // Only real subscription revenue
+      const periodRevenue = 0; // No period revenue calculation for now
+      
+      console.log(`Coach ${coach._id} revenue calculation:`, {
+        activeSubscriptions,
+        totalSubscriptionRevenue,
+        estimatedRevenue,
+        totalSessions,
+        periodSessions,
+        periodRevenue
       });
 
       financialData.push({
@@ -402,28 +712,60 @@ exports.getFinancialOverview = async (req, res) => {
         coachName: coach.additionalInfo?.name || 'Unknown',
         coachEmail: coach.additionalInfo?.email || '',
         activeSubscriptions,
+        totalSubscriptionRevenue,
         totalSessions,
-        thisMonthSessions,
-        // Assuming each subscription is worth a fixed amount (you can modify this based on your pricing)
-        estimatedRevenue: activeSubscriptions * 1000 // Example: 1000 per subscription
+        periodSessions,
+        estimatedRevenue, // Based on actual subscription fees or session count
+        periodRevenue // Based on period sessions
       });
     }
 
     // Calculate totals
     const totalActiveSubscriptions = financialData.reduce((sum, item) => sum + item.activeSubscriptions, 0);
     const totalRevenue = financialData.reduce((sum, item) => sum + item.estimatedRevenue, 0);
+    const totalPeriodRevenue = financialData.reduce((sum, item) => sum + item.periodRevenue, 0);
+    const totalPeriodSessions = financialData.reduce((sum, item) => sum + item.periodSessions, 0);
+    
+    console.log('=== Total Calculations ===');
+    console.log('Total Active Subscriptions:', totalActiveSubscriptions);
+    console.log('Total Revenue (from subscriptions):', totalRevenue);
+    console.log('Total Period Revenue (from sessions):', totalPeriodRevenue);
+    console.log('Total Period Sessions:', totalPeriodSessions);
+    console.log('Financial Data Array:', financialData);
 
-    res.status(200).json({
+    const response = {
       success: true,
       summary: {
         totalCoaches: coaches.length,
         totalActiveSubscriptions,
-        totalEstimatedRevenue: totalRevenue
+        totalEstimatedRevenue: totalRevenue,
+        totalPeriodRevenue,
+        totalPeriodSessions,
+        period
       },
-      coachData: financialData
-    });
+      coachData: financialData,
+      financial: {
+        totalCoaches: coaches.length,
+        totalActiveSubscriptions,
+        totalEstimatedRevenue: totalRevenue,
+        totalPeriodRevenue,
+        totalPeriodSessions,
+        period,
+        coachData: financialData
+      }
+    };
+    
+    console.log('=== Financial overview response ===');
+    console.log('Response summary:', response.summary);
+    console.log('Response financial:', response.financial);
+    console.log('Coach data count:', response.coachData.length);
+    
+    res.status(200).json(response);
   } catch (error) {
-    console.error('Error fetching financial overview:', error);
+    console.error('=== Error fetching financial overview ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -525,7 +867,19 @@ exports.getCoachFinancialData = async (req, res) => {
 exports.manageCoachSchedule = async (req, res) => {
   try {
     const { coachId } = req.params;
-    const { days, startTime, endTime } = req.body;
+    const { 
+      days, 
+      startTime, 
+      endTime, 
+      title, 
+      description, 
+      sessionType, 
+      duration, 
+      maxParticipants, 
+      category, 
+      difficulty, 
+      timezone 
+    } = req.body;
 
     // Validation
     const { error } = coachScheduleValidation({ days, startTime, endTime });
@@ -552,6 +906,14 @@ exports.manageCoachSchedule = async (req, res) => {
       if (days) existingSchedule.days = days;
       if (startTime) existingSchedule.startTime = startTime;
       if (endTime) existingSchedule.endTime = endTime;
+      if (title) existingSchedule.title = title;
+      if (description) existingSchedule.description = description;
+      if (sessionType) existingSchedule.sessionType = sessionType;
+      if (duration) existingSchedule.duration = duration;
+      if (maxParticipants) existingSchedule.maxParticipants = maxParticipants;
+      if (category) existingSchedule.category = category;
+      if (difficulty) existingSchedule.difficulty = difficulty;
+      if (timezone) existingSchedule.timezone = timezone;
       
       await existingSchedule.save();
       
@@ -566,7 +928,15 @@ exports.manageCoachSchedule = async (req, res) => {
         coach: coachId,
         days: days || [],
         startTime: startTime || '09:00',
-        endTime: endTime || '10:00'
+        endTime: endTime || '10:00',
+        title: title || 'Coaching Session',
+        description: description || '',
+        sessionType: sessionType || 'individual',
+        duration: duration || 60,
+        maxParticipants: maxParticipants || 1,
+        category: category || 'fitness',
+        difficulty: difficulty || 'beginner',
+        timezone: timezone || 'Asia/Kolkata'
       });
 
       res.status(201).json({
@@ -815,6 +1185,7 @@ exports.createCoachProfile = async (req, res) => {
 // Get all coach profiles with detailed information
 exports.getAllCoachProfiles = async (req, res) => {
   try {
+    console.log('getAllCoachProfiles called');
     const { page = 1, limit = 10, isActive, specialization } = req.query;
     const skip = (page - 1) * limit;
 
@@ -837,6 +1208,9 @@ exports.getAllCoachProfiles = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const total = await CoachProfile.countDocuments(filter);
+    
+    console.log('Found coach profiles:', coachProfiles.length);
+    console.log('Total coach profiles in database:', total);
 
     // Get additional statistics for each coach
     const profilesWithStats = await Promise.all(
@@ -872,6 +1246,13 @@ exports.getAllCoachProfiles = async (req, res) => {
         };
       })
     );
+
+    console.log('Returning coach profiles response:', {
+      success: true,
+      count: profilesWithStats.length,
+      total,
+      coachProfiles: profilesWithStats
+    });
 
     res.status(200).json({
       success: true,

@@ -11,7 +11,7 @@ const {
   getAllCoachesDetailed,
   getCoachDetailed,
   getAllStudentsDetailed,
-  getFinancialOverview,
+  // getFinancialOverview, // Removed - using CoachManager endpoint instead
   getCoachFinancialData,
   forceDeleteCoach,
   getSystemOverview,
@@ -62,7 +62,8 @@ const {
   bulkUpdateProductStatus,
   getProductDetailsForAdmin,
   updateProductForAdmin,
-  deleteProductForAdmin
+  deleteProductForAdmin,
+  exportProductsAsPDF
 } = require("../../Controller/ProductsController/productManagementController");
 
 // Middleware to protect super admin routes
@@ -109,7 +110,7 @@ router.patch("/coaches/:coachId/status", authentication, isSuperAdmin, toggleCoa
 router.get("/students", authentication, isSuperAdmin, getAllStudentsDetailed);
 
 // ===================== SUPER ADMIN FINANCIAL MANAGEMENT =====================
-router.get("/financial/overview", authentication, isSuperAdmin, getFinancialOverview);
+// Removed /financial/overview route - now using CoachManager endpoint for accurate revenue calculation
 router.get("/coaches/:coachId/financial", authentication, isSuperAdmin, getCoachFinancialData);
 
 // ===================== SUPER ADMIN SYSTEM OVERVIEW =====================
@@ -145,6 +146,7 @@ router.delete("/coach-schedule-sales/:saleId", authentication, isSuperAdmin, del
 // ===================== SUPER ADMIN PRODUCT MANAGEMENT =====================
 router.get("/products", authentication, isSuperAdmin, productLimiter, getAllProductsForAdmin);
 router.get("/products/analytics", authentication, isSuperAdmin, productLimiter, getProductAnalytics);
+router.get("/products/export/pdf", authentication, isSuperAdmin, productLimiter, exportProductsAsPDF);
 router.put("/products/bulk-status", authentication, isSuperAdmin, productLimiter, bulkUpdateProductStatus);
 router.get("/products/:productId", authentication, isSuperAdmin, productLimiter, getProductDetailsForAdmin);
 router.put("/products/:productId", authentication, isSuperAdmin, productLimiter, updateProductForAdmin);

@@ -13,6 +13,7 @@ const {
   // Student Management
   getCoachStudents,
   getAllStudents,
+  getInactiveSubscriptions,
   
   // Financial Management
   getFinancialOverview,
@@ -124,6 +125,9 @@ router.get('/coaches/:coachId/students', getCoachStudents);
 
 // Get all students across all coaches
 router.get('/students', getAllStudents);
+
+// Get inactive/expired subscriptions for analysis
+router.get('/students/inactive', getInactiveSubscriptions);
 
 // ===================== FINANCIAL MANAGEMENT ROUTES =====================
 

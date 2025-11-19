@@ -1,7 +1,7 @@
 const Joi = require('joi');
 const mongoose = require('mongoose');
 
-exports.createProductValidation = ({ name, description, price, category, quantity, sellerId, brand, weight, dimensions, originalPrice, lowStockThreshold, metaTitle, metaDescription, keywords }) => {
+exports.createProductValidation = ({ name, description, price, category, quantity, sellerId, brand, subcategory, originalPrice, discountPercentage, lowStockThreshold, weight, dimensions, metaTitle, metaDescription, keywords, isActive, isFeatured }) => {
   const schema = Joi.object({
     sellerId: Joi.string().required().messages({
       'any.required': 'Seller ID is required',
@@ -30,6 +30,11 @@ exports.createProductValidation = ({ name, description, price, category, quantit
       'number.base': 'Original price must be a number',
       'number.positive': 'Original price must be a positive number',
     }),
+    discountPercentage: Joi.number().min(0).max(100).optional().messages({
+      'number.base': 'Discount percentage must be a number',
+      'number.min': 'Discount percentage must be at least 0',
+      'number.max': 'Discount percentage must be at most 100',
+    }),
     category: Joi.string().min(2).max(50).required().messages({
       'string.base': 'Category must be a string',
       'string.empty': 'Category is required',
@@ -37,8 +42,13 @@ exports.createProductValidation = ({ name, description, price, category, quantit
       'string.max': 'Category must be at most 50 characters',
       'any.required': 'Category is required',
     }),
-    subcategory: Joi.string().optional().messages({
-      'string.base': 'Subcategory must be a string',
+    subcategory: Joi.string().custom((value, helpers) => {
+      if (!mongoose.Types.ObjectId.isValid(value)) {
+        return helpers.error('any.invalid');
+      }
+      return value;
+    }, 'ObjectId validation').optional().allow('').messages({
+      'any.invalid': 'Subcategory ID must be a valid MongoDB ObjectId',
     }),
     quantity: Joi.number().integer().min(0).required().messages({
       'number.base': 'Quantity must be a number',
@@ -46,43 +56,49 @@ exports.createProductValidation = ({ name, description, price, category, quantit
       'number.min': 'Quantity must be at least 0',
       'any.required': 'Quantity is required',
     }),
-    brand: Joi.string().max(50).optional().messages({
+    brand: Joi.string().max(50).optional().allow('').messages({
       'string.base': 'Brand must be a string',
       'string.max': 'Brand must be at most 50 characters',
-    }),
-    weight: Joi.number().positive().optional().messages({
-      'number.base': 'Weight must be a number',
-      'number.positive': 'Weight must be a positive number',
-    }),
-    dimensions: Joi.object({
-      length: Joi.number().positive().required(),
-      width: Joi.number().positive().required(),
-      height: Joi.number().positive().required()
-    }).optional().messages({
-      'object.base': 'Dimensions must be an object',
     }),
     lowStockThreshold: Joi.number().integer().min(0).optional().messages({
       'number.base': 'Low stock threshold must be a number',
       'number.integer': 'Low stock threshold must be an integer',
       'number.min': 'Low stock threshold must be at least 0',
     }),
-    metaTitle: Joi.string().max(60).optional().messages({
+    weight: Joi.number().positive().optional().messages({
+      'number.base': 'Weight must be a number',
+      'number.positive': 'Weight must be a positive number',
+    }),
+    dimensions: Joi.object({
+      length: Joi.number().positive().optional(),
+      width: Joi.number().positive().optional(),
+      height: Joi.number().positive().optional()
+    }).optional().messages({
+      'object.base': 'Dimensions must be an object',
+    }),
+    metaTitle: Joi.string().max(60).optional().allow('').messages({
       'string.base': 'Meta title must be a string',
       'string.max': 'Meta title must be at most 60 characters',
     }),
-    metaDescription: Joi.string().max(160).optional().messages({
+    metaDescription: Joi.string().max(160).optional().allow('').messages({
       'string.base': 'Meta description must be a string',
       'string.max': 'Meta description must be at most 160 characters',
     }),
     keywords: Joi.array().items(Joi.string()).optional().messages({
       'array.base': 'Keywords must be an array',
     }),
+    isActive: Joi.boolean().optional().messages({
+      'boolean.base': 'Active status must be a boolean',
+    }),
+    isFeatured: Joi.boolean().optional().messages({
+      'boolean.base': 'Featured status must be a boolean',
+    }),
   });
 
-  return schema.validate({ name, description, price, category, quantity, sellerId, brand, weight, dimensions, originalPrice, lowStockThreshold, metaTitle, metaDescription, keywords });
+  return schema.validate({ name, description, price, category, quantity, sellerId, brand, subcategory, originalPrice, discountPercentage, lowStockThreshold, weight, dimensions, metaTitle, metaDescription, keywords, isActive, isFeatured });
 };
 
-exports.updateProductValidation = ({ productId, name, description, price, category, quantity, brand, weight, dimensions, originalPrice, lowStockThreshold, metaTitle, metaDescription, keywords }) => {
+exports.updateProductValidation = ({ productId, name, description, price, category, quantity, brand, subcategory, originalPrice, discountPercentage, lowStockThreshold, weight, dimensions, metaTitle, metaDescription, keywords, isActive, isFeatured }) => {
   // Custom Joi validator for ObjectId
   const objectIdValidator = (value, helpers) => {
     if (!mongoose.Types.ObjectId.isValid(value)) {
@@ -115,53 +131,69 @@ exports.updateProductValidation = ({ productId, name, description, price, catego
       'number.base': 'Original price must be a number',
       'number.positive': 'Original price must be a positive number',
     }),
+    discountPercentage: Joi.number().min(0).max(100).optional().messages({
+      'number.base': 'Discount percentage must be a number',
+      'number.min': 'Discount percentage must be at least 0',
+      'number.max': 'Discount percentage must be at most 100',
+    }),
     category: Joi.string().min(2).max(50).optional().messages({
       'string.base': 'Category must be a string',
       'string.min': 'Category must be at least 2 characters',
       'string.max': 'Category must be at most 50 characters',
     }),
-    subcategory: Joi.string().optional().messages({
-      'string.base': 'Subcategory must be a string',
+    subcategory: Joi.string().custom((value, helpers) => {
+      if (!mongoose.Types.ObjectId.isValid(value)) {
+        return helpers.error('any.invalid');
+      }
+      return value;
+    }, 'ObjectId validation').optional().allow('').messages({
+      'any.invalid': 'Subcategory ID must be a valid MongoDB ObjectId',
     }),
     quantity: Joi.number().integer().min(0).optional().messages({
       'number.base': 'Quantity must be a number',
       'number.integer': 'Quantity must be an integer',
       'number.min': 'Quantity must be at least 0',
     }),
-    brand: Joi.string().max(50).optional().messages({
+    brand: Joi.string().max(50).optional().allow('').messages({
       'string.base': 'Brand must be a string',
       'string.max': 'Brand must be at most 50 characters',
-    }),
-    weight: Joi.number().positive().optional().messages({
-      'number.base': 'Weight must be a number',
-      'number.positive': 'Weight must be a positive number',
-    }),
-    dimensions: Joi.object({
-      length: Joi.number().positive().required(),
-      width: Joi.number().positive().required(),
-      height: Joi.number().positive().required()
-    }).optional().messages({
-      'object.base': 'Dimensions must be an object',
     }),
     lowStockThreshold: Joi.number().integer().min(0).optional().messages({
       'number.base': 'Low stock threshold must be a number',
       'number.integer': 'Low stock threshold must be an integer',
       'number.min': 'Low stock threshold must be at least 0',
     }),
-    metaTitle: Joi.string().max(60).optional().messages({
+    weight: Joi.number().positive().optional().messages({
+      'number.base': 'Weight must be a number',
+      'number.positive': 'Weight must be a positive number',
+    }),
+    dimensions: Joi.object({
+      length: Joi.number().positive().optional(),
+      width: Joi.number().positive().optional(),
+      height: Joi.number().positive().optional()
+    }).optional().messages({
+      'object.base': 'Dimensions must be a valid object',
+    }),
+    metaTitle: Joi.string().max(60).optional().allow('').messages({
       'string.base': 'Meta title must be a string',
       'string.max': 'Meta title must be at most 60 characters',
     }),
-    metaDescription: Joi.string().max(160).optional().messages({
+    metaDescription: Joi.string().max(160).optional().allow('').messages({
       'string.base': 'Meta description must be a string',
       'string.max': 'Meta description must be at most 160 characters',
     }),
     keywords: Joi.array().items(Joi.string()).optional().messages({
       'array.base': 'Keywords must be an array',
     }),
+    isActive: Joi.boolean().optional().messages({
+      'boolean.base': 'Active status must be a boolean',
+    }),
+    isFeatured: Joi.boolean().optional().messages({
+      'boolean.base': 'Featured status must be a boolean',
+    }),
   });
 
-  return schema.validate({ productId, name, description, price, category, quantity, brand, weight, dimensions, originalPrice, lowStockThreshold, metaTitle, metaDescription, keywords });
+  return schema.validate({ productId, name, description, price, category, quantity, brand, subcategory, originalPrice, discountPercentage, lowStockThreshold, weight, dimensions, metaTitle, metaDescription, keywords, isActive, isFeatured });
 };
 
 exports.buyProductValidation = ({ productId, quantity, address }) => {

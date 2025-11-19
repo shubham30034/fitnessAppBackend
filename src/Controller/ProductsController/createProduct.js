@@ -14,21 +14,24 @@ const sanitizeProductData = (data) => {
         name: data.name ? xss(data.name.trim()) : undefined,
         description: data.description ? xss(data.description.trim()) : undefined,
         brand: data.brand ? xss(data.brand.trim()) : undefined,
-        metaTitle: data.metaTitle ? xss(data.metaTitle.trim()) : undefined,
-        metaDescription: data.metaDescription ? xss(data.metaDescription.trim()) : undefined,
-        keywords: data.keywords?.map(k => xss(k.trim())) || [],
         price: data.price ? Number(data.price) : undefined,
         originalPrice: data.originalPrice ? Number(data.originalPrice) : undefined,
+        discountPercentage: data.discountPercentage ? Number(data.discountPercentage) : undefined,
         quantity: data.quantity ? Number(data.quantity) : undefined,
+        lowStockThreshold: data.lowStockThreshold ? Number(data.lowStockThreshold) : undefined,
         weight: data.weight ? Number(data.weight) : undefined,
         dimensions: data.dimensions ? {
-            length: Number(data.dimensions.length),
-            width: Number(data.dimensions.width),
-            height: Number(data.dimensions.height)
+            length: data.dimensions.length ? Number(data.dimensions.length) : undefined,
+            width: data.dimensions.width ? Number(data.dimensions.width) : undefined,
+            height: data.dimensions.height ? Number(data.dimensions.height) : undefined
         } : undefined,
         category: data.category,
         subcategory: data.subcategory,
-        lowStockThreshold: data.lowStockThreshold ? Number(data.lowStockThreshold) : 5
+        metaTitle: data.metaTitle ? xss(data.metaTitle.trim()) : undefined,
+        metaDescription: data.metaDescription ? xss(data.metaDescription.trim()) : undefined,
+        keywords: data.keywords ? data.keywords.map(k => xss(k.trim())) : undefined,
+        isActive: data.isActive !== undefined ? data.isActive : true,
+        isFeatured: data.isFeatured !== undefined ? data.isFeatured : false
     };
 };
 
@@ -112,15 +115,52 @@ exports.createProduct = async (req, res) => {
             variants: rawData.variants || []
         });
 
+        // Generate unique slug before saving
         try {
+            console.log('🔍 Generating unique slug for:', sanitizedData.name);
+            newProduct.slug = await Product.generateUniqueSlug(sanitizedData.name);
+            console.log('🔍 Generated slug:', newProduct.slug);
+            
+            // Double-check slug uniqueness before saving
+            const existingSlug = await Product.findOne({ slug: newProduct.slug });
+            if (existingSlug) {
+                console.log('🔍 WARNING: Generated slug already exists, using timestamp fallback');
+                newProduct.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+                console.log('🔍 Final fallback slug:', newProduct.slug);
+            }
+        } catch (slugError) {
+            console.error('Error generating slug:', slugError);
+            // Fallback to timestamp-based slug
+            newProduct.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+            console.log('🔍 Using fallback slug:', newProduct.slug);
+        }
+
+        try {
+            console.log('🔍 Attempting to save product with slug:', newProduct.slug);
             if (useTransactions) {
                 await newProduct.save({ session });
             } else {
                 await newProduct.save();
             }
+            console.log('🔍 Product saved successfully');
         } catch (saveError) {
             console.error('Save error:', saveError);
-            throw saveError;
+            
+            // If it's a duplicate key error, try with a timestamp-based slug
+            if (saveError.code === 11000 && saveError.keyPattern?.slug) {
+                console.log('🔍 Duplicate slug error during save, retrying with timestamp');
+                newProduct.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                console.log('🔍 New timestamp slug:', newProduct.slug);
+                
+                if (useTransactions) {
+                    await newProduct.save({ session });
+                } else {
+                    await newProduct.save();
+                }
+                console.log('🔍 Product saved successfully with timestamp slug');
+            } else {
+                throw saveError;
+            }
         }
 
         if (useTransactions) {
@@ -147,6 +187,17 @@ exports.createProduct = async (req, res) => {
         if (useTransactions) {
             await session.abortTransaction();
         }
+        
+        // Handle duplicate key errors specifically
+        if (error.code === 11000) {
+            console.error('Duplicate key error:', error.keyValue);
+            return res.status(400).json({
+                success: false,
+                message: `Duplicate ${Object.keys(error.keyValue)[0]} found. Please use a different value.`,
+                error: process.env.NODE_ENV === 'test' ? error.message : 'Duplicate key error'
+            });
+        }
+        
         console.error('Product creation error:', error);
         
         return res.status(500).json({
@@ -277,10 +328,60 @@ exports.updateProduct = async (req, res) => {
         // Update product
         Object.assign(product, sanitizedData);
         
-        if (useTransactions) {
-            await product.save({ session });
+        // If name changed, generate new unique slug
+        if (sanitizedData.name && sanitizedData.name !== product.name) {
+            try {
+                console.log('🔍 Name changed, generating new slug for:', sanitizedData.name);
+                console.log('🔍 Excluding product ID:', productId);
+                product.slug = await Product.generateUniqueSlug(sanitizedData.name, productId);
+                console.log('🔍 New slug generated:', product.slug);
+                
+                // Double-check slug uniqueness before saving
+                const existingSlug = await Product.findOne({ 
+                    slug: product.slug,
+                    _id: { $ne: productId }
+                });
+                if (existingSlug) {
+                    console.log('🔍 WARNING: Generated slug already exists, using timestamp fallback');
+                    product.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+                    console.log('🔍 Final fallback slug:', product.slug);
+                }
+            } catch (slugError) {
+                console.error('Error generating slug:', slugError);
+                // Fallback to timestamp-based slug
+                product.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+                console.log('🔍 Using fallback slug:', product.slug);
+            }
         } else {
-            await product.save();
+            console.log('🔍 Name unchanged, keeping existing slug:', product.slug);
+        }
+        
+        try {
+            console.log('🔍 Attempting to save updated product with slug:', product.slug);
+            if (useTransactions) {
+                await product.save({ session });
+            } else {
+                await product.save();
+            }
+            console.log('🔍 Product updated successfully');
+        } catch (saveError) {
+            console.error('Save error during update:', saveError);
+            
+            // If it's a duplicate key error, try with a timestamp-based slug
+            if (saveError.code === 11000 && saveError.keyPattern?.slug) {
+                console.log('🔍 Duplicate slug error during update, retrying with timestamp');
+                product.slug = `${sanitizedData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                console.log('🔍 New timestamp slug for update:', product.slug);
+                
+                if (useTransactions) {
+                    await product.save({ session });
+                } else {
+                    await product.save();
+                }
+                console.log('🔍 Product updated successfully with timestamp slug');
+            } else {
+                throw saveError;
+            }
         }
 
         if (useTransactions) {
@@ -303,6 +404,17 @@ exports.updateProduct = async (req, res) => {
         if (useTransactions) {
             await session.abortTransaction();
         }
+        
+        // Handle duplicate key errors specifically
+        if (error.code === 11000) {
+            console.error('Duplicate key error:', error.keyValue);
+            return res.status(400).json({
+                success: false,
+                message: `Duplicate ${Object.keys(error.keyValue)[0]} found. Please use a different value.`,
+                error: process.env.NODE_ENV === 'test' ? error.message : 'Duplicate key error'
+            });
+        }
+        
         console.error('Product update error:', error);
         console.error('Error stack:', error.stack);
         console.error('Sanitized data that caused error:', sanitizedData);

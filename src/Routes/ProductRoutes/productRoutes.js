@@ -19,11 +19,15 @@ const {addToCart} = require("../../Controller/ProductsController/cart")
 const {
   createCategory,
   getAllCategories,
+  updateCategory,
+  deleteCategory,
 } = require("../../Controller/ProductsController/category");
 
 const {
   createSubCategory,
   getAllSubCategories,
+  updateSubCategory,
+  deleteSubCategory,
 } = require("../../Controller/ProductsController/subcategory");
 
 const {
@@ -44,6 +48,12 @@ const {
   getSellerProductAnalytics,
   getSellerProductPerformance,
   updateProductStatus
+} = require("../../Controller/ProductsController/productManagementController");
+// Seller order management (same controller file)
+const {
+  listSellerOrders,
+  getSellerOrderDetails,
+  updateSellerOrderStatus
 } = require("../../Controller/ProductsController/productManagementController");
 
 // ✅ Middleware
@@ -88,6 +98,20 @@ route.post("/", authentication, isSeller, productLimiter, createProduct);
 route.put("/:id", authentication, isSeller, productLimiter, updateProduct);
 route.delete("/:id", authentication, isSeller, productLimiter, deleteProduct);
 
+// ======================= 🧑‍💼 ADMIN / SUPERADMIN ROUTES =======================
+
+// CATEGORY ROUTES (Super Admin) - MUST COME BEFORE /:id ROUTE
+route.post("/categories", authentication, isSuperAdmin, productLimiter, createCategory); 
+route.get("/categories", getAllCategories); // Public
+route.put("/categories/:id", authentication, isSuperAdmin, productLimiter, updateCategory);
+route.delete("/categories/:id", authentication, isSuperAdmin, productLimiter, deleteCategory);
+
+// SUBCATEGORY ROUTES (Admin) - MUST COME BEFORE /:id ROUTE
+route.post("/subcategories", authentication, isAdmin, productLimiter, createSubCategory); 
+route.get("/subcategories", getAllSubCategories); // Public
+route.put("/subcategories/:id", authentication, isAdmin, productLimiter, updateSubCategory);
+route.delete("/subcategories/:id", authentication, isAdmin, productLimiter, deleteSubCategory);
+
 // Get single product by ID (accessible to any authenticated user)
 route.get("/:id", authentication, productLimiter, getSingleProduct);
 
@@ -115,16 +139,6 @@ route.put(
 // Add error handling middleware for product image uploads
 route.use(handleProductUploadError);
 
-// ======================= 🧑‍💼 ADMIN / SUPERADMIN ROUTES =======================
-
-// CATEGORY ROUTES (Super Admin)
-route.post("/categories", authentication, isSuperAdmin, productLimiter, createCategory); 
-route.get("/categories", getAllCategories); // Public
-
-// SUBCATEGORY ROUTES (Admin)
-route.post("/subcategories", authentication, isAdmin, productLimiter, createSubCategory); 
-route.get("/subcategories", getAllSubCategories); // Public
-
 // ======================= 🏪 PRODUCT MANAGEMENT ROUTES =======================
 
 // ======================= SUPERADMIN PRODUCT MANAGEMENT =======================
@@ -151,5 +165,13 @@ route.get("/seller/performance/:productId", authentication, isSeller, productLim
 
 // Update product status (active/inactive, featured) - Seller
 route.patch("/seller/:productId/status", authentication, isSeller, productLimiter, updateProductStatus);
+
+// ======================= SELLER ORDER MANAGEMENT =======================
+// List seller's orders
+route.get("/orders/seller", authentication, isSeller, productLimiter, listSellerOrders);
+// Get order details
+route.get("/orders/:orderId", authentication, isSeller, productLimiter, getSellerOrderDetails);
+// Update order status
+route.patch("/orders/:orderId/status", authentication, isSeller, productLimiter, updateSellerOrderStatus);
 
 module.exports = route;

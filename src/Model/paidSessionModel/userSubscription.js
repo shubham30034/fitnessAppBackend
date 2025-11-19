@@ -177,6 +177,21 @@ const userSubscriptionSchema = new mongoose.Schema({
     default: false
   },
   
+  // ===================== EXPIRATION TRACKING =====================
+  
+  // Track when subscription was expired
+  expiredAt: {
+    type: Date,
+    sparse: true
+  },
+  
+  // Reason for expiration
+  expirationReason: {
+    type: String,
+    enum: ['automatic_expiration', 'manual_cancellation', 'payment_failed', 'admin_action'],
+    sparse: true
+  },
+  
   // ===================== ADDITIONAL FIELDS =====================
   
   notes: {
@@ -200,11 +215,12 @@ const userSubscriptionSchema = new mongoose.Schema({
 // Indexes for better performance
 userSubscriptionSchema.index({ client: 1, coach: 1 });
 userSubscriptionSchema.index({ platform: 1 });
+userSubscriptionSchema.index({ isActive: 1, endDate: 1 }); // For expiration queries
+userSubscriptionSchema.index({ endDate: 1 }); // For finding expired subscriptions
 userSubscriptionSchema.index({ paymentStatus: 1 });
 userSubscriptionSchema.index({ isActive: 1 });
 userSubscriptionSchema.index({ 'applePurchase.transactionId': 1 }, { sparse: true });
 userSubscriptionSchema.index({ 'googlePurchase.purchaseToken': 1 }, { sparse: true });
-userSubscriptionSchema.index({ endDate: 1 });
 
 // Virtual for getting platform-specific purchase info
 userSubscriptionSchema.virtual('purchaseInfo').get(function() {

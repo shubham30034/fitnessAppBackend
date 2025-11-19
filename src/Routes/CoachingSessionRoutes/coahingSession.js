@@ -32,6 +32,26 @@ const {
   getUserSubscriptions,
   cancelInAppSubscription,
   getCoachProducts,
+  // Subscription expiration management
+  manualSubscriptionCleanup,
+  getSubscriptionExpirationStats,
+  // SuperAdmin coaching sessions management
+  getAllSessionsForSuperAdmin,
+  getSessionsByDateRangeForSuperAdmin,
+  getSessionsByCoachForSuperAdmin,
+  getSessionsByStatusForSuperAdmin,
+  updateSessionStatusForSuperAdmin,
+  deleteSessionForSuperAdmin,
+  bulkUpdateSessionsForSuperAdmin,
+  bulkDeleteSessionsForSuperAdmin,
+  getCoachingSessionsAnalyticsForSuperAdmin,
+  getCoachingSessionsStatsForSuperAdmin,
+  getCoachingSessionsDashboardForSuperAdmin,
+  exportSessionsDataForSuperAdmin,
+  generateSessionsForCoachForSuperAdmin,
+  generateSessionsForAllCoachesForSuperAdmin,
+  getCoachingSessionsDiagnostics,
+  createCoachSchedules,
 } = require('../../Controller/CoachingSession/coach');
 
 // Example middleware for authentication and role check
@@ -61,6 +81,10 @@ router.put('/inapp/subscriptions/:subscriptionId/cancel', authentication, cancel
 // Product management
 router.get('/inapp/products/coach/:coachId', getCoachProducts);
 router.get('/inapp/products', getCoachProducts);
+
+// Subscription expiration management (Admin only)
+router.post('/admin/subscription-cleanup', authentication, isSuperAdmin, manualSubscriptionCleanup);
+router.get('/admin/subscription-stats', authentication, isSuperAdmin, getSubscriptionExpirationStats);
 
 // ---------- COACH ROUTES ----------
 router.get('/coach/upcoming-sessions', authentication, isCoach, getUpcomingCoachSessions);
@@ -92,6 +116,24 @@ router.get('/coach/notifications', authentication, isCoach, getCoachNotification
 // ---------- SUPERADMIN ROUTES ----------
 router.post('/superadmin/schedule', authentication, isSuperAdmin, createCoachSchedule);
 router.put('/superadmin/schedule/:scheduleId', authentication, isSuperAdmin, editCoachSchedule);
+
+// ===================== SUPERADMIN COACHING SESSIONS MANAGEMENT =====================
+router.get('/superadmin/sessions', authentication, isSuperAdmin, getAllSessionsForSuperAdmin);
+router.get('/superadmin/sessions/date-range', authentication, isSuperAdmin, getSessionsByDateRangeForSuperAdmin);
+router.get('/superadmin/sessions/coach/:coachId', authentication, isSuperAdmin, getSessionsByCoachForSuperAdmin);
+router.get('/superadmin/sessions/status/:status', authentication, isSuperAdmin, getSessionsByStatusForSuperAdmin);
+router.put('/superadmin/sessions/:sessionId/status', authentication, isSuperAdmin, updateSessionStatusForSuperAdmin);
+router.delete('/superadmin/sessions/:sessionId', authentication, isSuperAdmin, deleteSessionForSuperAdmin);
+router.post('/superadmin/sessions/bulk-update', authentication, isSuperAdmin, bulkUpdateSessionsForSuperAdmin);
+router.delete('/superadmin/sessions/bulk-delete', authentication, isSuperAdmin, bulkDeleteSessionsForSuperAdmin);
+router.get('/superadmin/analytics', authentication, isSuperAdmin, getCoachingSessionsAnalyticsForSuperAdmin);
+router.get('/superadmin/stats', authentication, isSuperAdmin, getCoachingSessionsStatsForSuperAdmin);
+router.get('/superadmin/dashboard', authentication, isSuperAdmin, getCoachingSessionsDashboardForSuperAdmin);
+router.get('/superadmin/diagnostics', authentication, isSuperAdmin, getCoachingSessionsDiagnostics);
+router.get('/superadmin/export', authentication, isSuperAdmin, exportSessionsDataForSuperAdmin);
+router.post('/superadmin/generate-sessions/:coachId', authentication, isSuperAdmin, generateSessionsForCoachForSuperAdmin);
+router.post('/superadmin/generate-all-sessions', authentication, isSuperAdmin, generateSessionsForAllCoachesForSuperAdmin);
+router.post('/superadmin/create-coach-schedules', authentication, isSuperAdmin, createCoachSchedules);
 
 // ---------- ZOOM AUTH ----------
 router.get('/zoom/connect', connectZoom);

@@ -60,6 +60,15 @@ const sessionSchema = new mongoose.Schema({
   duration: {
     type: Number, // in minutes
     default: 60
+  },
+  monthlyFee: {
+    type: Number,
+    default: 0
+  },
+  currency: {
+    type: String,
+    default: 'INR',
+    enum: ['INR', 'USD', 'EUR']
   }
 }, { timestamps: true });
 

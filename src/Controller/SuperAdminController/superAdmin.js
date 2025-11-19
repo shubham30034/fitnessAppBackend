@@ -492,8 +492,13 @@ exports.getCoachDetailed = async (req, res) => {
 // Get all students across all coaches
 exports.getAllStudentsDetailed = async (req, res) => {
   try {
+    // Get current date for expiration check
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
+    
     const subscriptions = await UserSubscription.find({
-      isActive: true
+      isActive: true,
+      endDate: { $gte: today } // Only include subscriptions that haven't expired yet
     })
       .populate({
         path: 'client',
@@ -567,69 +572,9 @@ exports.getAllStudentsDetailed = async (req, res) => {
   }
 };
 
-// Get comprehensive financial overview
-exports.getFinancialOverview = async (req, res) => {
-  try {
-    const coaches = await User.find({ role: 'coach' })
-      .populate('additionalInfo', 'name email');
-
-    const financialData = [];
-
-    for (const coach of coaches) {
-      // Get active subscriptions
-      const activeSubscriptions = await UserSubscription.countDocuments({
-        coach: coach._id,
-        isActive: true
-      });
-
-      // Get total sessions conducted
-      const totalSessions = await Session.countDocuments({
-        coach: coach._id
-      });
-
-      // Get this month's sessions
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-
-      const thisMonthSessions = await Session.countDocuments({
-        coach: coach._id,
-        date: { $gte: startOfMonth }
-      });
-
-      financialData.push({
-        coachId: coach._id,
-        coachName: coach.additionalInfo?.name || 'Unknown',
-        coachEmail: coach.additionalInfo?.email || '',
-        activeSubscriptions,
-        totalSessions,
-        thisMonthSessions,
-        estimatedRevenue: activeSubscriptions * 1000 // Example: 1000 per subscription
-      });
-    }
-
-    // Calculate totals
-    const totalActiveSubscriptions = financialData.reduce((sum, item) => sum + item.activeSubscriptions, 0);
-    const totalRevenue = financialData.reduce((sum, item) => sum + item.estimatedRevenue, 0);
-
-    res.status(200).json({
-      success: true,
-      summary: {
-        totalCoaches: coaches.length,
-        totalActiveSubscriptions,
-        totalEstimatedRevenue: totalRevenue
-      },
-      coachData: financialData
-    });
-  } catch (error) {
-    console.error('Error fetching financial overview:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
-};
+// Get comprehensive financial overview - REMOVED (using CoachManager endpoint instead)
+// This endpoint used hardcoded ₹1000 per subscription which was incorrect
+// Now using CoachManager.getFinancialOverview which uses actual subscription fees from database
 
 // Get detailed financial data for a specific coach
 exports.getCoachFinancialData = async (req, res) => {
@@ -1107,7 +1052,24 @@ exports.getComprehensiveFinancialOverview = async (req, res) => {
         isActive: true
       });
 
-      const estimatedRevenue = activeSubscriptions * 1000; // Adjust based on your pricing
+      // Calculate actual revenue from subscription fees
+      const activeSubscriptionsData = await UserSubscription.find({
+        coach: coach._id,
+        isActive: true,
+        endDate: { $gte: new Date() }
+      });
+      
+      const estimatedRevenue = activeSubscriptionsData.reduce((sum, sub) => {
+        let feeInINR = 0;
+        if (sub.currency === 'INR') {
+          feeInINR = sub.monthlyFee || 0;
+        } else if (sub.currency === 'USD') {
+          feeInINR = (sub.monthlyFee || 0) * 83; // Convert USD to INR
+        } else if (sub.currency === 'EUR') {
+          feeInINR = (sub.monthlyFee || 0) * 90; // Convert EUR to INR
+        }
+        return sum + feeInINR;
+      }, 0);
       coachesRevenue += estimatedRevenue;
 
       coachesData.push({

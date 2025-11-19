@@ -195,7 +195,9 @@ productSchema.pre('save', function(next) {
         this.sku = `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
     
-    if (!this.slug) {
+    // Only generate slug if it's not already set AND this is a new document
+    // This prevents overriding manually generated unique slugs during updates
+    if (!this.slug && this.isNew) {
         this.slug = this.name.toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/(^-|-$)/g, '');
@@ -217,6 +219,43 @@ productSchema.virtual('discountedPrice').get(function() {
     }
     return this.price;
 });
+
+// Static method to generate unique slug
+productSchema.statics.generateUniqueSlug = async function(name, excludeId = null) {
+    console.log('🔍 generateUniqueSlug called with:', { name, excludeId });
+    
+    let baseSlug = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+    
+    console.log('🔍 Base slug:', baseSlug);
+    
+    let slug = baseSlug;
+    let counter = 1;
+    
+    while (true) {
+        const query = { slug: slug };
+        if (excludeId) {
+            query._id = { $ne: excludeId };
+        }
+        
+        console.log('🔍 Checking slug uniqueness:', slug, 'with query:', query);
+        
+        const existingProduct = await this.findOne(query);
+        
+        if (!existingProduct) {
+            console.log('🔍 Slug is unique:', slug);
+            break; // Slug is unique
+        }
+        
+        console.log('🔍 Slug exists, incrementing counter');
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+    }
+    
+    console.log('🔍 Final unique slug:', slug);
+    return slug;
+};
 
 // Instance method to check if product is in stock
 productSchema.methods.isInStock = function() {
