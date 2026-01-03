@@ -1,6 +1,3 @@
-const BMICategory = require("../../Model/bmiCategorySchema/bmiCategorySchema");
-const {calculateBMIValidation} = require("../../validator/bmiValidation")
-
 exports.calculateBMI = async (req, res) => {
   const { weight, height } = req.body;
 
@@ -13,30 +10,45 @@ exports.calculateBMI = async (req, res) => {
     });
   }
 
-  // Convert to numbers after validation
   const weightNum = Number(weight);
   const heightNum = Number(height);
 
+  if (weightNum <= 0 || heightNum <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Weight and height must be greater than zero",
+    });
+  }
+
   const heightM = heightNum / 100;
-  const bmi = weightNum / (heightM * heightM);
+  const bmi = Number((weightNum / (heightM * heightM)).toFixed(2));
 
   try {
     const category = await BMICategory.findOne({
       min: { $lte: bmi },
-      max: { $gte: bmi }
+      max: { $gte: bmi },
     });
 
     if (!category) {
-      return res.status(404).json({ error: "No matching BMI category found" });
+      return res.status(200).json({
+        success: true,
+        bmi,
+        category: "Unknown",
+        dietAdvice: "Consult a health professional.",
+      });
     }
 
     res.status(200).json({
-      bmi: bmi.toFixed(2),
+      success: true,
+      bmi,
       category: category.category,
-      dietAdvice: category.dietAdvice
+      dietAdvice: category.dietAdvice,
     });
-  } catch (error) {
-    console.error("BMI calculation error:", error);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("BMI calculation error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };

@@ -1,259 +1,105 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const userSubscriptionSchema = new mongoose.Schema({
-  client: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
-  coach: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
-  startDate: { 
-    type: Date, 
-    required: true 
-  },
-  endDate: { 
-    type: Date, 
-    required: true 
-  },
-  isActive: { 
-    type: Boolean, 
-    default: true 
-  },
-  subscriptionType: {
-    type: String,
-    enum: ['monthly', 'quarterly', 'yearly', 'custom'],
-    default: 'monthly'
-  },
-  // Monthly subscription fee
-  monthlyFee: {
-    type: Number,
-    required: true
-  },
-  currency: {
-    type: String,
-    default: 'INR',
-    enum: ['INR', 'USD', 'EUR']
-  },
-  sessionsPerMonth: {
-    type: Number,
-    default: 4
-  },
-  sessionsUsed: {
-    type: Number,
-    default: 0
-  },
-  
-  // ===================== IN-APP PURCHASE FIELDS =====================
-  
-  // Platform information
-  platform: {
-    type: String,
-    enum: ['ios', 'android', 'web'],
-    required: true
-  },
-  
-  // Apple App Store specific fields
-  applePurchase: {
-    transactionId: {
-      type: String,
-      sparse: true // Allow null for non-Apple purchases
+const UserSubscriptionSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    originalTransactionId: {
-      type: String,
-      sparse: true
+
+    coach: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-    productId: {
+
+    platform: {
       type: String,
-      sparse: true
+      enum: ["apple", "google"],
+      required: true,
     },
-    purchaseToken: {
+
+    planType: {
       type: String,
-      sparse: true
+      enum: ["monthly", "yearly"],
+      required: true,
     },
-    receiptData: {
-      type: String,
-      sparse: true
+
+    isActive: {
+      type: Boolean,
+      default: true,
     },
-    receiptSignature: {
+
+    paymentStatus: {
       type: String,
-      sparse: true
+      enum: ["paid", "pending", "failed"],
+      default: "paid",
     },
-    environment: {
-      type: String,
-      enum: ['Sandbox', 'Production'],
-      sparse: true
-    },
-    bundleId: {
-      type: String,
-      sparse: true
-    },
-    appAccountToken: {
-      type: String,
-      sparse: true
-    }
-  },
-  
-  // Google Play Billing specific fields
-  googlePurchase: {
-    purchaseToken: {
-      type: String,
-      sparse: true // Allow null for non-Google purchases
-    },
-    orderId: {
-      type: String,
-      sparse: true
-    },
-    productId: {
-      type: String,
-      sparse: true
-    },
-    packageName: {
-      type: String,
-      sparse: true
-    },
-    purchaseTime: {
+
+    startDate: {
       type: Date,
-      sparse: true
+      required: true,
     },
-    purchaseState: {
-      type: Number, // 0: pending, 1: purchased, 2: cancelled
-      sparse: true
+
+    endDate: {
+      type: Date,
+      required: true,
     },
-    developerPayload: {
-      type: String,
-      sparse: true
+
+    /* =========================
+       APPLE PURCHASE
+    ========================= */
+    applePurchase: {
+      transactionId: { type: String },
+      productId: { type: String },
+      originalTransactionId: { type: String },
     },
-    isAcknowledged: {
-      type: Boolean,
-      default: false
+
+    /* =========================
+       GOOGLE PURCHASE
+    ========================= */
+    googlePurchase: {
+      purchaseToken: { type: String },
+      productId: { type: String },
+      orderId: { type: String },
     },
-    isAutoRenewing: {
-      type: Boolean,
-      default: false
-    },
-    purchaseType: {
-      type: String,
-      enum: ['subscription', 'one-time'],
-      sparse: true
-    }
   },
-  
-  // ===================== PAYMENT STATUS & VERIFICATION =====================
-  
-  paymentStatus: {
-    type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded', 'cancelled', 'expired'],
-    default: 'pending'
-  },
-  
-  // Receipt verification status
-  receiptVerified: {
-    type: Boolean,
-    default: false
-  },
-  receiptVerifiedAt: {
-    type: Date,
-    sparse: true
-  },
-  receiptVerificationAttempts: {
-    type: Number,
-    default: 0
-  },
-  
-  // Subscription status from platform
-  platformSubscriptionStatus: {
-    type: String,
-    enum: ['active', 'expired', 'cancelled', 'pending', 'unknown'],
-    default: 'unknown'
-  },
-  
-  // Auto-renewal status
-  autoRenewStatus: {
-    type: Boolean,
-    default: false
-  },
-  
-  // ===================== EXPIRATION TRACKING =====================
-  
-  // Track when subscription was expired
-  expiredAt: {
-    type: Date,
-    sparse: true
-  },
-  
-  // Reason for expiration
-  expirationReason: {
-    type: String,
-    enum: ['automatic_expiration', 'manual_cancellation', 'payment_failed', 'admin_action'],
-    sparse: true
-  },
-  
-  // ===================== ADDITIONAL FIELDS =====================
-  
-  notes: {
-    type: String,
-    maxLength: 500
-  },
-  
-  // Metadata for tracking
-  metadata: {
-    deviceId: String,
-    appVersion: String,
-    osVersion: String,
-    purchaseSource: {
-      type: String,
-      enum: ['app_store', 'play_store', 'web', 'admin'],
-      default: 'app_store'
-    }
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
-// Indexes for better performance
-userSubscriptionSchema.index({ client: 1, coach: 1 });
-userSubscriptionSchema.index({ platform: 1 });
-userSubscriptionSchema.index({ isActive: 1, endDate: 1 }); // For expiration queries
-userSubscriptionSchema.index({ endDate: 1 }); // For finding expired subscriptions
-userSubscriptionSchema.index({ paymentStatus: 1 });
-userSubscriptionSchema.index({ isActive: 1 });
-userSubscriptionSchema.index({ 'applePurchase.transactionId': 1 }, { sparse: true });
-userSubscriptionSchema.index({ 'googlePurchase.purchaseToken': 1 }, { sparse: true });
+/* =========================
+   INDEXES (ONLY HERE)
+========================= */
 
-// Virtual for getting platform-specific purchase info
-userSubscriptionSchema.virtual('purchaseInfo').get(function() {
-  if (this.platform === 'ios') {
-    return {
-      platform: 'ios',
-      transactionId: this.applePurchase?.transactionId,
-      productId: this.applePurchase?.productId,
-      receiptData: this.applePurchase?.receiptData,
-      environment: this.applePurchase?.environment
-    };
-  } else if (this.platform === 'android') {
-    return {
-      platform: 'android',
-      purchaseToken: this.googlePurchase?.purchaseToken,
-      orderId: this.googlePurchase?.orderId,
-      productId: this.googlePurchase?.productId,
-      packageName: this.googlePurchase?.packageName
-    };
-  }
-  return { platform: this.platform };
-});
+// user–coach relation
+UserSubscriptionSchema.index({ user: 1, coach: 1 });
 
-// Virtual for checking if subscription is valid
-userSubscriptionSchema.virtual('isValid').get(function() {
-  return this.isActive && 
-         this.paymentStatus === 'completed' && 
-         this.receiptVerified && 
-         new Date() <= this.endDate;
-});
+// filters
+UserSubscriptionSchema.index({ platform: 1 });
+UserSubscriptionSchema.index({ isActive: 1 });
+UserSubscriptionSchema.index({ paymentStatus: 1 });
+UserSubscriptionSchema.index({ endDate: 1 });
 
-// Ensure virtuals are included when converting to JSON
-userSubscriptionSchema.set('toJSON', { virtuals: true });
-userSubscriptionSchema.set('toObject', { virtuals: true });
+// Apple / Google identifiers
+UserSubscriptionSchema.index(
+  { "applePurchase.transactionId": 1 },
+  { sparse: true }
+);
 
-module.exports = mongoose.model('UserSubscription', userSubscriptionSchema);
+UserSubscriptionSchema.index(
+  { "applePurchase.productId": 1 },
+  { sparse: true }
+);
+
+UserSubscriptionSchema.index(
+  { "googlePurchase.purchaseToken": 1 },
+  { sparse: true }
+);
+
+UserSubscriptionSchema.index(
+  { "googlePurchase.productId": 1 },
+  { sparse: true }
+);
+
+module.exports = mongoose.model("UserSubscription", UserSubscriptionSchema);

@@ -1,18 +1,21 @@
 const express = require("express");
-const router = express.Router(); // ✅ use `router`, not `route`
+const router = express.Router();
 
-// Import the controller
-const { aiDietPlan,updateWeekWithAI,updateDayWithAI,getDietPlan } = require("../../Controller/CalorieSection/aiNutritionSuggestion");
+const {
+  generateAIDiet,
+  getActiveDiet,
+} = require("../../Controller/CalorieSection/aiNutritionSuggestion");
 
- const {authentication} = require("../../Middleware/userAuth")
+const { authentication } = require("../../Middleware/userAuth");
 
+/* =====================================================
+   AI DIET ROUTES
+===================================================== */
 
+// Generate or regenerate AI diet (e.g. 7-day plan)
+router.post("/generate-diet", authentication, generateAIDiet);
 
-
-// Define the POST route for generating AI diet plans
-router.post("/generate-diet",authentication, aiDietPlan);
-router.post("/update-week",authentication,updateWeekWithAI)
-router.post("/update-day",authentication,updateDayWithAI)
-router.get("/get-aiDiet",authentication,getDietPlan)
+// Get currently active diet (if not expired)
+router.get("/active-diet", authentication, getActiveDiet);
 
 module.exports = router;

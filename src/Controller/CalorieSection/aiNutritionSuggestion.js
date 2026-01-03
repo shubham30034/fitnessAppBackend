@@ -1,329 +1,176 @@
-const AiDiet = require("../../Model/calorieModel/aiNutrition");
-const fetch = require("node-fetch"); // npm install node-fetch@2
-const openRouter = require("../../Utils/aiApi")
-const {aiDietPlanValidation,updateWeekValidation,updateDayValidation} = require("../../validator/calorieValidation")
+const AIDiet = require("../../Model/calorieModel/aiDiet");
+const UserDietProfile = require("../../Model/calorieModel/userDietProfile");
+const openRouter = require("../../Utils/aiApi");
+const { aiDietPlanValidation } = require("../../validator/calorieValidation");
 
-require("dotenv").config()
+/* =====================================================
+   HELPERS
+===================================================== */
 
+const getExpiryDate = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
-function buildPrompt({ age, gender, heightCm, weightKg, goal, dietaryPreferences, medicalConditions, numDays }) {
-  return `You are a diet expert. Create a JSON array of ${numDays} daily Indian diet plans for a person with the following profile:
+const buildPrompt = ({
+  age,
+  gender,
+  heightCm,
+  weightKg,
+  goal,
+  dietaryPreferences,
+  medicalConditions,
+  numDays,
+}) => `
+You are a professional Indian nutritionist.
 
-Age: ${age}, Gender: ${gender}
-Height: ${heightCm} cm, Weight: ${weightKg} kg
+Create a ${numDays}-day diet plan in VALID JSON.
+
+User profile:
+Age: ${age}
+Gender: ${gender}
+Height: ${heightCm} cm
+Weight: ${weightKg} kg
 Goal: ${goal}
-Dietary Preferences: ${dietaryPreferences.length ? dietaryPreferences.join(', ') : 'none'}
-Medical Conditions: ${medicalConditions.length ? medicalConditions.join(', ') : 'none'}
+Dietary Preferences: ${dietaryPreferences.length ? dietaryPreferences.join(", ") : "none"}
+Medical Conditions: ${medicalConditions.length ? medicalConditions.join(", ") : "none"}
 
-Each day should include 4 meals: breakfast, lunch, dinner, and snack.
-Each meal must be an object like:
+Return ONLY JSON in this format:
+
 {
-  "type": "mealType",
-  "items": [
-    { "name": "food name", "quantity": "100g / 1 cup / 2 pcs", "calories": 123 }
+  "days": [
+    {
+      "label": "Day 1",
+      "meals": [
+        {
+          "name": "Breakfast",
+          "items": [
+            {
+              "food": "Poha",
+              "quantityGrams": 100,
+              "calories": 250
+            }
+          ]
+        }
+      ]
+    }
   ]
 }
 
-Each day should be:
-{
-  "meals": [ ... ] // four meals
-}
+Rules:
+- No explanations
+- No markdown
+- No comments
+- quantityGrams MUST be a number
+`.trim();
 
-Return ONLY valid JSON in this format:
-[
-  {
-    "meals": [
-      {
-        "type": "breakfast",
-        "items": [
-          { "name": "poha", "quantity": "100g", "calories": 250 }
-        ]
-      },
-      ...
-    ]
-  },
-  ...
-]
+/* =====================================================
+   AI CALL
+===================================================== */
 
-Important:
-- Do NOT include comments, explanations, or markdown.
-- Do NOT wrap in \`\`\`json or code blocks.
-- Ensure proper array structure and comma placement.
-- Key must be "items" (not "item" or anything else).`.trim();
-}
+const getDietFromAI = async (prompt) => {
+  const data = await openRouter(prompt);
+  const content = data?.choices?.[0]?.message?.content;
 
-
-function injectDates(dietPlan) {
-  const today = new Date();
-  return dietPlan.map((day, i) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + i);
-    return { ...day, date: date.toISOString().split('T')[0] };
-  });
-}
-
-// utils/jsonSanitizer.js
-
-function sanitizeJSON(json) {
-  return json
-    .replace(/^```(?:json)?\s*|\s*```$/g, '') // remove code fences
-    .replace(/\/\/.*$/gm, '')                 // remove JS-style comments
-    .replace(/\/\*[\s\S]*?\*\//g, '')         // remove block comments
-    .replace(/\bitem\b/g, 'items')            // fix incorrect key
-    .replace(/,\s*([\]}])/g, '$1')            // remove trailing commas
-    .trim();
-}
-
-// controller/aiDietPlanController.js
-
-async function getDietPlanFromAI(userData) {
-  const prompt = buildPrompt({ ...userData, numDays: userData.numWeeks * 7 });
-
-  const { choices } = await openRouter(prompt);
-  const aiContent = choices?.[0]?.message?.content;
-
-  if (!aiContent) throw new Error("No content from AI");
-
-  console.log("AI Raw Response:", aiContent);
+  if (!content) throw new Error("No response from AI");
 
   try {
-    const sanitized = sanitizeJSON(aiContent);
-    console.log("Sanitized JSON:", sanitized);
-
-    // Ensure it's a JSON array
-    if (!sanitized.startsWith("[")) throw new Error("AI response must start with a JSON array.");
-
-    return JSON.parse(sanitized);
+    return JSON.parse(content);
   } catch (err) {
-    console.error("Failed to parse AI response:", aiContent);
     throw new Error("Invalid JSON from AI");
   }
-}
+};
 
-// ai Diet plan controller
-exports.aiDietPlan = async (req, res) => {
+/* =====================================================
+   CREATE / REPLACE AI DIET
+===================================================== */
+
+exports.generateAIDiet = async (req, res) => {
   try {
-    const { id: userId } = req.user || {};
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
 
     const { error, value } = aiDietPlanValidation(req.body);
     if (error) {
       return res.status(400).json({
         success: false,
-        message: "Validation failed",
-        errors: error.details.map(e => e.message),
+        errors: error.details.map((e) => e.message),
       });
     }
 
-    const {
-      age, gender, heightCm, weightKg,
-      goal, dietaryPreferences = [],
-      medicalConditions = [], numWeeks = 1,
-    } = value;
+    const { numDays = 7 } = value;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "User not authenticated" });
-    }
-
-    if (await AiDiet.findOne({ userId })) {
-      return res.status(409).json({ success: false, message: "AI diet plan already exists for this user" });
-    }
-
-    const rawPlan = await getDietPlanFromAI({
-      age, gender, heightCm, weightKg,
-      goal, dietaryPreferences, medicalConditions, numWeeks
-    });
-
-    const datedPlan = injectDates(rawPlan);
-
-    if (!Array.isArray(datedPlan) || datedPlan.length !== numWeeks * 7) {
-      return res.status(400).json({ success: false, message: `Expected ${numWeeks * 7} days in diet plan` });
-    }
-
-    const weeklyPlans = Array.from({ length: numWeeks }, (_, w) => {
-      const days = datedPlan.slice(w * 7, (w + 1) * 7).map(day => {
-        const totalCalories = day.meals.reduce(
-          (sum, meal) => sum + meal.items.reduce((s, item) => s + item.calories, 0), 0
-        );
-        return {
-          date: new Date(day.date),
-          dayOfWeek: new Date(day.date).toLocaleDateString("en-US", { weekday: "long" }),
-          meals: day.meals,
-          totalCalories
-        };
-      });
-      return {
-        weekNumber: w + 1,
-        startDate: new Date(days[0].date),
-        endDate: new Date(days[6].date),
-        days
-      };
-    });
-
-    const newDiet = await AiDiet.create({
-      userId,
-      age, gender, heightCm, weightKg,
-      goal, dietaryPreferences, medicalConditions,
-      weeklyPlans,
-      createdAt: new Date()
-    });
-
-    res.status(201).json({ success: true, message: "AI diet plan created", data: newDiet });
-
-  } catch (err) {
-    console.error("Diet Plan Error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-
-// Helper: create prompt for updating diet plan (week or day)
-function createUpdatePrompt(existingPlan, userRequest) {
-  return `
-You are a nutritionist AI.
-
-Here is the current diet plan JSON:
-${JSON.stringify(existingPlan, null, 2)}
-
-The user requests the following change:
-"${userRequest}"
-
-Please provide the updated diet plan JSON with this change applied
-Respond ONLY with raw, valid JSON. Do NOT include explanations, comments, markdown, or any non-JSON text. Even a single comment will break the application.
-  `;
-}
-
-// Helper: call AI API to get updated plan JSON
-async function callAIForUpdate(prompt) {
-  const data = await openRouter(prompt)
-  if (!data) {
-    throw new Error("Unable to fetch data from AI");
-  }
-
-
-
-  const aiMessage = data.choices?.[0]?.message?.content;
-
-  console.log("aiMessage",aiMessage)
-
-  if (!aiMessage) throw new Error("No content received from AI");
-
-  try {
-    return JSON.parse(aiMessage);
-  } catch {
-    // fallback extract JSON block
-    const jsonMatch = aiMessage.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    throw new Error("Failed to parse updated plan JSON from AI response");
-  }
-}
-
-// Controller: PATCH update entire week plan using AI
-exports.updateWeekWithAI = async (req, res) => {
-  try {
-    const userId = req.user?.id;
-    const { weekNumber, userRequest } = req.body;
-
-      const { error } = updateWeekValidation({ weekNumber, userRequest });
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: error.details.map(e => e.message),
-      });
-    }
-
-    const userDiet = await AiDiet.findOne({ userId });
-    if (!userDiet) return res.status(404).json({ success: false, message: "Diet plan not found" });
-
-    const weekPlan = userDiet.weeklyPlans.find(wp => wp.weekNumber === weekNumber);
-    if (!weekPlan) return res.status(404).json({ success: false, message: `Week ${weekNumber} not found` });
-
-    const prompt = createUpdatePrompt(weekPlan, userRequest);
-    const updatedWeekPlan = await callAIForUpdate(prompt);
-
-    const result = await AiDiet.updateOne(
-      { userId, "weeklyPlans.weekNumber": weekNumber },
-      { $set: { "weeklyPlans.$": updatedWeekPlan } }
-    );
-
-    res.status(200).json({ success: true, message: "Week plan updated successfully with AI", updatedWeekPlan, result });
-  } catch (error) {
-    console.error("Error updating week plan with AI:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Controller: PATCH update single day plan using AI
-exports.updateDayWithAI = async (req, res) => {
-  try {
-    const userId = req.user?.id;
-    const { weekNumber, date, userRequest } = req.body;
-
-   const { error } = updateDayValidation({ weekNumber, date, userRequest });
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: error.details.map(e => e.message),
-      });
-    }
-    const userDiet = await AiDiet.findOne({ userId });
-    if (!userDiet) return res.status(404).json({ success: false, message: "Diet plan not found" });
-
-    const weekPlan = userDiet.weeklyPlans.find(wp => wp.weekNumber === weekNumber);
-    if (!weekPlan) return res.status(404).json({ success: false, message: `Week ${weekNumber} not found` });
-
-    const dayPlan = weekPlan.days.find(d => d.date.toISOString().slice(0, 10) === date);
-    if (!dayPlan) return res.status(404).json({ success: false, message: `Day ${date} not found in week ${weekNumber}` });
-
-    const prompt = createUpdatePrompt(dayPlan, userRequest);
-    const updatedDayPlan = await callAIForUpdate(prompt);
-
-    const result = await AiDiet.updateOne(
-      { userId, "weeklyPlans.weekNumber": weekNumber },
-      { $set: { "weeklyPlans.$[week].days.$[day]": updatedDayPlan } },
-      { arrayFilters: [{ "week.weekNumber": weekNumber }, { "day.date": new Date(date) }] }
-    );
-
-    res.status(200).json({ success: true, message: "Day plan updated successfully with AI", updatedDayPlan, result });
-  } catch (error) {
-    console.error("Error updating day plan with AI:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-
-
-// Controller: Get AI Diet Plan for logged-in user
-exports.getDietPlan = async (req, res) => {
-  try {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const userDiet = await AiDiet.findOne({ userId });
-
-    if (!userDiet) {
+    const profile = await UserDietProfile.findOne({ userId });
+    if (!profile) {
       return res.status(404).json({
         success: false,
-        message: "Diet plan not found for this user",
+        message: "User diet profile not found",
+      });
+    }
+
+    const prompt = buildPrompt({
+      ...profile.toObject(),
+      numDays,
+    });
+
+    const dietPlan = await getDietFromAI(prompt);
+
+    // Replace existing diet if exists
+    await AIDiet.findOneAndDelete({ userId });
+
+    const diet = await AIDiet.create({
+      userId,
+      durationDays: numDays,
+      dietPlan,
+      expiresAt: getExpiryDate(numDays),
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "AI diet generated successfully",
+      data: diet,
+    });
+  } catch (err) {
+    console.error("AI Diet Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+/* =====================================================
+   GET ACTIVE DIET
+===================================================== */
+
+exports.getActiveDiet = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const diet = await AIDiet.findOne({ userId });
+    if (!diet) {
+      return res.status(404).json({
+        success: false,
+        message: "No active diet. Generate a new one.",
       });
     }
 
     return res.status(200).json({
       success: true,
-      data: userDiet,
+      data: diet,
     });
-  } catch (error) {
-    console.error("Error fetching diet plan:", error);
+  } catch (err) {
+    console.error("Get Diet Error:", err);
     return res.status(500).json({
       success: false,
-      message: "Server error: " + error.message,
+      message: err.message,
     });
   }
 };

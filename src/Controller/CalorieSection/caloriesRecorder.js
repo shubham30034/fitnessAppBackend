@@ -1,194 +1,244 @@
-const CalorieRecord = require("../../Model/calorieModel/caloriesRecorder");
+// Controller/CalorieSection/caloriesRecorder.js
+
 const Calorie = require("../../Model/calorieModel/calorieModel");
+const CalorieRecord = require("../../Model/calorieModel/caloriesRecorder");
+
 const { fetchNutritionFromAI } = require("../../services/nutritionSection/aiNutrition");
+const { unitToGrams } = require("../../Utils/unitToGram");
 
-// Helper to get YYYY-MM-DD string for today in local timezone to match model validation
+/* =========================
+   DATE HELPERS (FIXED)
+========================= */
+
 const getTodayDateString = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const d = new Date();
+  return d.toISOString().split("T")[0];
 };
 
-// Helper to get next midnight (start of next day)
 const getNextMidnight = () => {
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(24, 0, 0, 0);
-  return nextMidnight;
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
 };
 
-// Convert units to grams
-const unitToGrams = (unit, quantity) => {
-  const unitMap = {
-    g: 1,
-    gram: 1,
-    grams: 1,
-    kg: 1000,
-    kilogram: 1000,
-    ml: 1,
-    litre: 1000,
-    cup: 240,
-    tbsp: 15,
-    tsp: 5,
-    piece: 50,
-  };
-  unit = unit?.toLowerCase();
-  if (!unitMap[unit]) return null;
-  return quantity * unitMap[unit];
-};
-
+/* =========================
+   RECORD DAILY CALORIES
+========================= */
 exports.recordDailyCalories = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { foodName, quantity = 100, unit = "g", mealType } = req.body;
+    const userId = req.user?.id;
+    const { foodName, quantity = 1, unit = "g", mealType } = req.body;
 
-    if (!userId) return res.status(401).json({ success: false, message: "User not authenticated" });
-    if (!foodName || !mealType) return res.status(400).json({ success: false, message: "Missing foodName or mealType" });
-
-    const validMeals = ["breakfast", "lunch", "dinner", "snacks"];
-    if (!validMeals.includes(mealType)) {
-      return res.status(400).json({ success: false, message: "Invalid mealType" });
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    const date = getTodayDateString();
+    const allowedMeals = ["breakfast", "lunch", "dinner", "snacks"];
+    if (!foodName || !allowedMeals.includes(mealType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid foodName or mealType",
+      });
+    }
+
     const normalizedFoodName = foodName.toLowerCase().trim();
-    const quantityInGrams = unitToGrams(unit, quantity);
 
-    if (quantityInGrams === null) {
-      return res.status(400).json({ success: false, message: "Invalid or unsupported unit." });
-    }
+    /* ---------- FOOD LOOKUP ---------- */
+    let food = await Calorie.findOne({ foodName: normalizedFoodName });
 
-    let foodData = await Calorie.findOne({ foodName: normalizedFoodName });
-
-    if (!foodData) {
-      const aiData = await fetchNutritionFromAI(normalizedFoodName);
-      if (!aiData) {
-        return res.status(404).json({ success: false, message: "Food not found" });
+    if (!food) {
+      const aiFood = await fetchNutritionFromAI(normalizedFoodName);
+      if (!aiFood) {
+        return res.status(404).json({
+          success: false,
+          message: "Food not found",
+        });
       }
-      foodData = new Calorie(aiData);
-      await foodData.save();
+      food = await Calorie.create(aiFood);
     }
 
-    const factor = quantityInGrams / foodData.baseQuantityInGrams;
+    /* ---------- UNIT → GRAMS (STRICT + CACHED) ---------- */
+    let grams;
+    try {
+      grams = await unitToGrams({
+        foodDoc: food,
+        unit,
+        quantity,
+      });
+    } catch (err) {
+      if (err.message === "PIECE_WEIGHT_REQUIRED") {
+        return res.status(422).json({
+          success: false,
+          requireWeightInput: true,
+          message: "1 piece ka approx weight grams me bataye",
+        });
+      }
+      throw err;
+    }
+
+    if (!grams || grams <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid quantity or unit",
+      });
+    }
+
+    /* ---------- SCALE NUTRITION ---------- */
+    const factor = grams / food.baseQuantityInGrams;
 
     const foodItem = {
-      foodName: foodData.foodName,
-      quantity: quantityInGrams,
-      unit: "grams",
-      calories: +(foodData.calories * factor).toFixed(2),
-      protein: +(foodData.protein * factor).toFixed(2),
-      carbs: +(foodData.carbs * factor).toFixed(2),
-      fats: +(foodData.fats * factor).toFixed(2),
-      sugar: +(foodData.sugar * factor).toFixed(2),
-      fiber: +(foodData.fiber * factor).toFixed(2),
+      foodName: food.foodName,
+      quantityInGrams: grams,
+      calories: +(food.calories * factor).toFixed(2),
+      protein: +(food.protein * factor).toFixed(2),
+      carbs: +(food.carbs * factor).toFixed(2),
+      fats: +(food.fats * factor).toFixed(2),
+      sugar: +(food.sugar * factor).toFixed(2),
+      fiber: +(food.fiber * factor).toFixed(2),
     };
 
-    let record = await CalorieRecord.findOne({ userId, date });
+    /* ---------- DAILY RECORD ---------- */
+    const today = getTodayDateString();
+    let record = await CalorieRecord.findOne({ userId, date: today });
 
     if (!record) {
       record = new CalorieRecord({
         userId,
-        date,
-        foods: { [mealType]: [foodItem] },
-        totalCalories: foodItem.calories,
-        totalProtein: foodItem.protein,
-        totalCarbs: foodItem.carbs,
-        totalFats: foodItem.fats,
-        totalSugar: foodItem.sugar,
-        totalFiber: foodItem.fiber,
-        expiryDate: getNextMidnight(),
+        date: today,
+        foods: { breakfast: [], lunch: [], dinner: [], snacks: [] },
+        totals: { calories: 0, protein: 0, carbs: 0, fats: 0, sugar: 0, fiber: 0 },
+        expiresAt: getNextMidnight(),
       });
-    } else {
-      record.foods[mealType].push(foodItem);
-      record.totalCalories += foodItem.calories;
-      record.totalProtein += foodItem.protein;
-      record.totalCarbs += foodItem.carbs;
-      record.totalFats += foodItem.fats;
-      record.totalSugar += foodItem.sugar;
-      record.totalFiber += foodItem.fiber;
-
-      record.expiryDate = getNextMidnight(); // refresh expiry date on update
     }
 
+    record.foods[mealType].push(foodItem);
+
+    record.totals.calories += foodItem.calories;
+    record.totals.protein += foodItem.protein;
+    record.totals.carbs += foodItem.carbs;
+    record.totals.fats += foodItem.fats;
+    record.totals.sugar += foodItem.sugar;
+    record.totals.fiber += foodItem.fiber;
+
+    record.expiresAt = getNextMidnight();
     await record.save();
 
-    return res.status(200).json({ success: true, message: "Food recorded", data: record });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(200).json({
+      success: true,
+      message: "Food recorded successfully",
+      data: record,
+      meta: {
+        averagePieceWeight: food.averagePieceWeight || null,
+      },
+    });
+  } catch (error) {
+    console.error("recordDailyCalories error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 
+/* =========================
+   GET TODAY CALORIES
+========================= */
 exports.getTodayCalories = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "User not authenticated" });
+      return res.status(401).json({ success: false });
     }
 
     const today = getTodayDateString();
     const record = await CalorieRecord.findOne({ userId, date: today });
+
+    if (!record) {
+      return res.status(200).json({
+        success: true,
+        date: today,
+        totals: null,
+        foods: null,
+      });
+    }
 
     return res.status(200).json({
       success: true,
       date: today,
-      totalCalories: record ? record.totalCalories : 0,
-      foods: record ? record.foods : { breakfast: [], lunch: [], dinner: [], snacks: [] },
+      totals: record.totals,
+      foods: record.foods,
     });
   } catch (error) {
-    console.error("Error fetching today's calories:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    console.error("getTodayCalories error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 
+/* =========================
+   REMOVE FOOD ITEM
+========================= */
 exports.removeFoodItem = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { mealType, foodId } = req.body;
+    const userId = req.user?.id;
+    const { mealType, foodItemId } = req.body;
 
-    if (!userId) return res.status(401).json({ success: false, message: "User not authenticated" });
-    if (!mealType || !foodId) return res.status(400).json({ success: false, message: "Missing mealType or foodId" });
+    const allowedMeals = ["breakfast", "lunch", "dinner", "snacks"];
 
-    const validMeals = ["breakfast", "lunch", "dinner", "snacks"];
-    if (!validMeals.includes(mealType)) {
-      return res.status(400).json({ success: false, message: "Invalid mealType" });
+    if (!userId || !allowedMeals.includes(mealType) || !foodItemId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request",
+      });
     }
 
     const today = getTodayDateString();
     const record = await CalorieRecord.findOne({ userId, date: today });
 
-    if (!record) return res.status(404).json({ success: false, message: "No calorie record found for today" });
-
-    const mealFoods = record.foods[mealType];
-    if (!mealFoods || mealFoods.length === 0) {
-      return res.status(404).json({ success: false, message: "No foods found for this meal" });
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "No record found for today",
+      });
     }
 
-    // Find the food item index by _id
-    const foodIndex = mealFoods.findIndex(item => item._id.toString() === foodId);
-    if (foodIndex === -1) {
-      return res.status(404).json({ success: false, message: "Food item not found" });
+    const foodArray = record.foods[mealType];
+    const itemIndex = foodArray.findIndex(
+      (item) => item._id.toString() === foodItemId
+    );
+
+    if (itemIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Food item not found",
+      });
     }
 
-    // Remove the food item
-    const removedFood = mealFoods.splice(foodIndex, 1)[0];
+    const [removed] = foodArray.splice(itemIndex, 1);
 
-    // Update totals
-    record.totalCalories -= removedFood.calories;
-    record.totalProtein -= removedFood.protein;
-    record.totalCarbs -= removedFood.carbs;
-    record.totalFats -= removedFood.fats;
-    record.totalSugar -= removedFood.sugar;
-    record.totalFiber -= removedFood.fiber;
+    // 🔽 Safe totals update
+    record.totals.calories = Math.max(0, +(record.totals.calories - removed.calories).toFixed(2));
+    record.totals.protein  = Math.max(0, +(record.totals.protein  - removed.protein ).toFixed(2));
+    record.totals.carbs    = Math.max(0, +(record.totals.carbs    - removed.carbs   ).toFixed(2));
+    record.totals.fats     = Math.max(0, +(record.totals.fats     - removed.fats    ).toFixed(2));
+    record.totals.sugar    = Math.max(0, +(record.totals.sugar    - removed.sugar   ).toFixed(2));
+    record.totals.fiber    = Math.max(0, +(record.totals.fiber    - removed.fiber   ).toFixed(2));
 
-    // Save updated record
     await record.save();
 
-    return res.status(200).json({ success: true, message: "Food item removed", data: record });
+    return res.json({
+      success: true,
+      message: "Food item removed successfully",
+      data: record,
+    });
   } catch (error) {
-    console.error("Error removing food item:", error);
-    return res.status(500).json({ success: false, message: "Server error" });
+    console.error("removeFoodItem error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };

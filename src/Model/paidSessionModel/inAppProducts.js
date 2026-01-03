@@ -1,181 +1,100 @@
 const mongoose = require('mongoose');
 
-const inAppProductSchema = new mongoose.Schema({
-  // Basic product information
-  name: {
-    type: String,
-    required: true
-  },
-  description: {
-    type: String,
-    required: true
-  },
-  
-  // Product type
+const inAppProductSchema = new mongoose.Schema(
+{
+  name: { type: String, required: true },
+  description: { type: String, required: true },
+
   productType: {
     type: String,
     enum: ['subscription', 'one_time'],
     required: true
   },
-  
-  // Subscription details (for subscription products)
+
   subscriptionDetails: {
     duration: {
-      type: Number, // in days
-      required: function() { return this.productType === 'subscription'; }
+      type: Number,
+      required: function () {
+        return this.productType === 'subscription';
+      }
     },
     sessionsPerMonth: {
       type: Number,
-      default: 4,
-      required: function() { return this.productType === 'subscription'; }
+      default: 4
     },
     autoRenewable: {
       type: Boolean,
-      default: true,
-      required: function() { return this.productType === 'subscription'; }
+      default: true
     }
   },
-  
-  // Pricing information
+
   pricing: {
-    basePrice: {
-      type: Number,
-      required: true
-    },
+    basePrice: { type: Number, required: true },
     currency: {
       type: String,
-      default: 'INR',
-      enum: ['INR', 'USD', 'EUR']
+      enum: ['INR', 'USD', 'EUR'],
+      default: 'INR'
     },
-    // Platform-specific pricing
-    applePrice: {
-      type: Number,
-      sparse: true
-    },
-    googlePrice: {
-      type: Number,
-      sparse: true
-    }
+    applePrice: Number,
+    googlePrice: Number
   },
-  
-  // ===================== APPLE APP STORE FIELDS =====================
-  
+
+  /* ========= APPLE ========= */
   appleProduct: {
     productId: {
       type: String,
       required: true,
-      unique: true
+      unique: true // ✔️ ONLY here
     },
-    bundleId: {
-      type: String,
-      required: true
-    },
-    displayName: {
-      type: String,
-      sparse: true
-    },
-    description: {
-      type: String,
-      sparse: true
-    },
-    price: {
-      type: Number,
-      sparse: true
-    },
-    priceLocale: {
-      type: String,
-      sparse: true
-    },
-    isActive: {
-      type: Boolean,
-      default: true
-    },
-    // Subscription group (for managing subscription tiers)
-    subscriptionGroup: {
-      type: String,
-      sparse: true
-    },
-    // Subscription period
+    bundleId: { type: String, required: true },
+    displayName: String,
+    description: String,
+    price: Number,
+    priceLocale: String,
+    isActive: { type: Boolean, default: true },
+    subscriptionGroup: String,
     subscriptionPeriod: {
       type: String,
-      enum: ['P1W', 'P1M', 'P3M', 'P6M', 'P1Y'],
-      sparse: true
+      enum: ['P1W', 'P1M', 'P3M', 'P6M', 'P1Y']
     }
   },
-  
-  // ===================== GOOGLE PLAY STORE FIELDS =====================
-  
+
+  /* ========= GOOGLE ========= */
   googleProduct: {
     productId: {
       type: String,
       required: true,
-      unique: true
+      unique: true // ✔️ ONLY here
     },
-    packageName: {
-      type: String,
-      required: true
-    },
-    title: {
-      type: String,
-      sparse: true
-    },
-    description: {
-      type: String,
-      sparse: true
-    },
-    price: {
-      type: Number,
-      sparse: true
-    },
-    priceCurrencyCode: {
-      type: String,
-      sparse: true
-    },
-    isActive: {
-      type: Boolean,
-      default: true
-    },
-    // Subscription period
+    packageName: { type: String, required: true },
+    title: String,
+    description: String,
+    price: Number,
+    priceCurrencyCode: String,
+    isActive: { type: Boolean, default: true },
     subscriptionPeriod: {
       type: String,
-      enum: ['P1W', 'P1M', 'P3M', 'P6M', 'P1Y'],
-      sparse: true
+      enum: ['P1W', 'P1M', 'P3M', 'P6M', 'P1Y']
     },
-    // Trial period (if applicable)
-    trialPeriod: {
-      type: String,
-      sparse: true
-    },
-    // Grace period
-    gracePeriod: {
-      type: String,
-      sparse: true
-    }
+    trialPeriod: String,
+    gracePeriod: String
   },
-  
-  // ===================== COACH ASSOCIATION =====================
-  
-  // If this product is specific to a coach
+
   coach: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    sparse: true
+    ref: 'User'
   },
-  
-  // If this is a global product (not coach-specific)
+
   isGlobal: {
     type: Boolean,
     default: false
   },
-  
-  // ===================== STATUS & METADATA =====================
-  
+
   isActive: {
     type: Boolean,
     default: true
   },
-  
-  // Product status on platforms
+
   platformStatus: {
     apple: {
       type: String,
@@ -188,44 +107,7 @@ const inAppProductSchema = new mongoose.Schema({
       default: 'pending'
     }
   },
-  
-  // Approval information
-  approvalInfo: {
-    appleApprovedAt: {
-      type: Date,
-      sparse: true
-    },
-    googleApprovedAt: {
-      type: Date,
-      sparse: true
-    },
-    appleRejectionReason: {
-      type: String,
-      sparse: true
-    },
-    googleRejectionReason: {
-      type: String,
-      sparse: true
-    }
-  },
-  
-  // Usage statistics
-  stats: {
-    totalPurchases: {
-      type: Number,
-      default: 0
-    },
-    activeSubscriptions: {
-      type: Number,
-      default: 0
-    },
-    totalRevenue: {
-      type: Number,
-      default: 0
-    }
-  },
-  
-  // Metadata
+
   metadata: {
     category: {
       type: String,
@@ -240,45 +122,17 @@ const inAppProductSchema = new mongoose.Schema({
       required: true
     }
   }
-}, { timestamps: true });
+},
+{ timestamps: true }
+);
 
-// Indexes for better performance
-inAppProductSchema.index({ 'appleProduct.productId': 1 });
-inAppProductSchema.index({ 'googleProduct.productId': 1 });
+/* ========= INDEXES (ONLY NON-DUPLICATE) ========= */
+
 inAppProductSchema.index({ coach: 1 });
 inAppProductSchema.index({ isGlobal: 1 });
 inAppProductSchema.index({ isActive: 1 });
 inAppProductSchema.index({ productType: 1 });
 inAppProductSchema.index({ 'platformStatus.apple': 1 });
 inAppProductSchema.index({ 'platformStatus.google': 1 });
-
-// Virtual for getting platform-specific product info
-inAppProductSchema.virtual('platformInfo').get(function() {
-  return {
-    apple: {
-      productId: this.appleProduct?.productId,
-      isActive: this.appleProduct?.isActive,
-      status: this.platformStatus?.apple,
-      price: this.appleProduct?.price
-    },
-    google: {
-      productId: this.googleProduct?.productId,
-      isActive: this.googleProduct?.isActive,
-      status: this.platformStatus?.google,
-      price: this.googleProduct?.price
-    }
-  };
-});
-
-// Virtual for checking if product is available on both platforms
-inAppProductSchema.virtual('isAvailable').get(function() {
-  return this.isActive && 
-         this.platformStatus?.apple === 'active' && 
-         this.platformStatus?.google === 'active';
-});
-
-// Ensure virtuals are included when converting to JSON
-inAppProductSchema.set('toJSON', { virtuals: true });
-inAppProductSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('InAppProduct', inAppProductSchema);

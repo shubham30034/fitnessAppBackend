@@ -1,37 +1,43 @@
 const mongoose = require('mongoose');
 
-const coachZoomSchema = new mongoose.Schema({
+const coachZoomSchema = new mongoose.Schema(
+{
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    unique: true,
+    unique: true, // one Zoom connection per coach
   },
-  // Zoom authentication fields
+
   zoomAccessToken: {
     type: String,
   },
+
   zoomRefreshToken: {
     type: String,
   },
+
   zoomTokenExpiry: {
     type: Date,
   },
+
   zoomUserId: {
     type: String,
   },
-  // Zoom connection status
+
   isConnected: {
     type: Boolean,
     default: false
   },
+
   lastConnectedAt: {
     type: Date
   }
-}, { timestamps: true });
+},
+{ timestamps: true }
+);
 
-// Index for better query performance
-coachZoomSchema.index({ user: 1 });
+// ✅ only non-duplicate index
 coachZoomSchema.index({ isConnected: 1 });
 
 module.exports = mongoose.model('CoachZoom', coachZoomSchema);

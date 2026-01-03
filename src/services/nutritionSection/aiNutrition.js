@@ -1,13 +1,29 @@
-
-const Calorie = require("../../Model/calorieModel/calorieModel");
+// services/nutritionSection/aiNutrition.js
 const openRouter = require("../../Utils/aiApi");
 
-// Fetch nutrition from AI with strict null on invalid food
+/**
+ * Fetch nutrition data for 100 grams of a real edible food.
+ * Returns null if food is invalid / not edible / AI response is bad.
+ */
 const fetchNutritionFromAI = async (foodName) => {
-  const prompt = `You are an expert nutritionist. Only provide nutrition info for real edible human foods. 
-If the food is not edible or doesn't exist (e.g., misspelled or nonsense), respond ONLY with the word null.
+  if (!foodName || typeof foodName !== "string") return null;
 
-Return ONLY a valid JSON object for 100 grams in this exact format:
+  const safeFoodName = foodName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z\s]/g, "");
+
+  if (!safeFoodName) return null;
+
+  const prompt = `
+You are an expert nutritionist.
+
+Only provide nutrition information for REAL, edible human foods.
+
+If the food does NOT exist or is NOT edible,
+respond ONLY with the word: null
+
+Return ONLY valid JSON for 100 grams in EXACT format:
 {
   "calories": number,
   "protein": number,
@@ -17,55 +33,60 @@ Return ONLY a valid JSON object for 100 grams in this exact format:
   "fiber": number
 }
 
-No explanations, no markdown, no extra text.
+No explanation.
+No markdown.
+No extra text.
 
-Food: ${foodName}`;
+Food: ${safeFoodName}
+`.trim();
 
   try {
-    const data = await openRouter(prompt)
-    if (!data) {
+    const data = await openRouter(prompt);
+  
+
+    const content = data?.choices?.[0]?.message?.content?.trim();
+    if (!content) return null;
+
+    const lower = content.toLowerCase();
+    if (
+      lower === "null" ||
+      lower.includes("not edible") ||
+      lower.includes("does not exist") ||
+      lower.includes("not a real food")
+    ) {
       return null;
     }
 
+    let nutrition;
+    try {
+      nutrition = JSON.parse(content);
+    } catch {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      nutrition = JSON.parse(match[0]);
+    }
 
-   
-    let content = data?.choices?.[0]?.message?.content?.trim();
-
-    if (!content || content.toLowerCase() === "null") return null;
-
-    // Extract JSON object if AI returns extra text
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    const nutritionJson = jsonMatch[0];
-    const nutritionData = JSON.parse(nutritionJson);
-
-    const requiredFields = ["calories", "protein", "carbs", "fats", "sugar", "fiber"];
-    for (const field of requiredFields) {
-      if (typeof nutritionData[field] !== "number" || nutritionData[field] < 0) {
+    const fields = ["calories", "protein", "carbs", "fats", "sugar", "fiber"];
+    for (const f of fields) {
+      if (typeof nutrition[f] !== "number" || nutrition[f] < 0) {
         return null;
       }
     }
 
     return {
-      foodName: foodName.toLowerCase(),
+      foodName: safeFoodName,
       baseQuantityInGrams: 100,
-      calories: nutritionData.calories,
-      protein: nutritionData.protein,
-      carbs: nutritionData.carbs,
-      fats: nutritionData.fats,
-      sugar: nutritionData.sugar,
-      fiber: nutritionData.fiber,
+      calories: nutrition.calories,
+      protein: nutrition.protein,
+      carbs: nutrition.carbs,
+      fats: nutrition.fats,
+      sugar: nutrition.sugar,
+      fiber: nutrition.fiber,
     };
-  } catch (error) {
-    console.error("AI fetch error:", error);
+  } catch (err) {
+    console.error("AI nutrition fetch error:", err.message);
     return null;
   }
 };
 
-
-
-
-module.exports = {
-  fetchNutritionFromAI,
-};
+module.exports = { fetchNutritionFromAI };
