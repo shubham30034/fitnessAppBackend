@@ -1,29 +1,28 @@
-// services/nutritionSection/aiNutrition.js
 const openRouter = require("../../Utils/aiApi");
 
-/**
- * Fetch nutrition data for 100 grams of a real edible food.
- * Returns null if food is invalid / not edible / AI response is bad.
- */
-const fetchNutritionFromAI = async (foodName) => {
-  if (!foodName || typeof foodName !== "string") return null;
+const fetchRawNutritionFromAI = async (foodName) => {
+  if (!foodName || typeof foodName !== "string") {
+    return { status: "invalid" };
+  }
 
   const safeFoodName = foodName
     .toLowerCase()
     .trim()
     .replace(/[^a-z\s]/g, "");
 
-  if (!safeFoodName) return null;
+  if (!safeFoodName) {
+    return { status: "invalid" };
+  }
 
   const prompt = `
-You are an expert nutritionist.
+You are a nutrition database.
 
-Only provide nutrition information for REAL, edible human foods.
+ONLY return nutrition values for RAW, SINGLE-INGREDIENT, UNCOOKED foods.
 
-If the food does NOT exist or is NOT edible,
-respond ONLY with the word: null
+If the food is cooked, prepared, a dish, or unclear,
+return ONLY: null
 
-Return ONLY valid JSON for 100 grams in EXACT format:
+Return ONLY JSON per 100 grams:
 {
   "calories": number,
   "protein": number,
@@ -33,28 +32,15 @@ Return ONLY valid JSON for 100 grams in EXACT format:
   "fiber": number
 }
 
-No explanation.
-No markdown.
-No extra text.
-
 Food: ${safeFoodName}
 `.trim();
 
   try {
     const data = await openRouter(prompt);
-  
-
     const content = data?.choices?.[0]?.message?.content?.trim();
-    if (!content) return null;
 
-    const lower = content.toLowerCase();
-    if (
-      lower === "null" ||
-      lower.includes("not edible") ||
-      lower.includes("does not exist") ||
-      lower.includes("not a real food")
-    ) {
-      return null;
+    if (!content || content.toLowerCase() === "null") {
+      return { status: "not_raw" };
     }
 
     let nutrition;
@@ -62,31 +48,34 @@ Food: ${safeFoodName}
       nutrition = JSON.parse(content);
     } catch {
       const match = content.match(/\{[\s\S]*\}/);
-      if (!match) return null;
+      if (!match) return { status: "invalid" };
       nutrition = JSON.parse(match[0]);
     }
 
+    // physics sanity check
     const fields = ["calories", "protein", "carbs", "fats", "sugar", "fiber"];
     for (const f of fields) {
       if (typeof nutrition[f] !== "number" || nutrition[f] < 0) {
-        return null;
+        return { status: "invalid" };
       }
     }
 
-    return {
-      foodName: safeFoodName,
-      baseQuantityInGrams: 100,
-      calories: nutrition.calories,
-      protein: nutrition.protein,
-      carbs: nutrition.carbs,
-      fats: nutrition.fats,
-      sugar: nutrition.sugar,
-      fiber: nutrition.fiber,
-    };
+    if (
+      nutrition.carbs > 100 ||
+      nutrition.protein > 100 ||
+      nutrition.fats > 100 ||
+      nutrition.sugar > nutrition.carbs ||
+      nutrition.calories > 900
+    ) {
+      return { status: "not_raw" };
+    }
+
+    return { status: "ok", data: nutrition };
+
   } catch (err) {
-    console.error("AI nutrition fetch error:", err.message);
-    return null;
+    console.error("AI error:", err.message);
+    return { status: "error" };
   }
 };
 
-module.exports = { fetchNutritionFromAI };
+module.exports = { fetchRawNutritionFromAI };

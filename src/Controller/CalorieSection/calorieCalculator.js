@@ -1,109 +1,269 @@
-// Controller/CalorieSection/searchFood.js
 const Calorie = require("../../Model/calorieModel/calorieModel");
-const { fetchNutritionFromAI } = require("../../services/nutritionSection/aiNutrition");
 const { unitToGrams } = require("../../Utils/unitToGram");
+const {
+  fetchRawNutritionFromAI,
+} = require("../../services/nutritionSection/aiNutrition");
 
-/* ================= HELPERS ================= */
-const normalizeFoodName = (name) =>
-  name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z\s]/g, "")
-    .replace(/\s+/g, " ");
+const normalize = (str) =>
+  str.toLowerCase().trim().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ");
 
-/* ================= CONTROLLER ================= */
 exports.searchFood = async (req, res) => {
   try {
-    const { foodName, quantity = 100, unit = "g" } = req.body;
+    const { foodName, quantity = 1, unit = "g" } = req.body;
 
-    if (!foodName || typeof foodName !== "string") {
-      return res.status(400).json({
-        success: false,
-        message: "Food name is required",
+    if (!foodName) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Food required" });
+    }
+
+    const normalized = normalize(foodName);
+    const foodKey = `${normalized}__per100g`;
+
+    let food = await Calorie.findOne({ foodKey });
+
+    /* =====================================================
+       RAW FOOD — FROM DB
+    ===================================================== */
+    if (food && food.foodCategory === "natural") {
+      let grams;
+      try {
+        grams = unitToGrams({ foodDoc: food, unit, quantity });
+      } catch (err) {
+        if (err.message === "PIECE_WEIGHT_REQUIRED") {
+          return res.status(422).json({
+            success: false,
+            code: "PIECE_WEIGHT_REQUIRED",
+            message: "Piece weight required for this food",
+            suggestions: [
+              { label: "Small", grams: 120 },
+              { label: "Medium", grams: 180 },
+              { label: "Large", grams: 250 },
+            ],
+            default: 180,
+          });
+        }
+        throw err;
+      }
+
+      if (grams == null) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid unit for raw food" });
+      }
+
+      const factor = grams / 100;
+
+      return res.json({
+        success: true,
+        type: "raw",
+        source: "db",
+        info: `Nutrition calculated for ${grams} g of raw ${food.foodName}`,
+        data: {
+          foodName: food.foodName,
+          grams,
+          calories: +(food.calories * factor).toFixed(1),
+          protein: +(food.protein * factor).toFixed(1),
+          carbs: +(food.carbs * factor).toFixed(1),
+          fats: +(food.fats * factor).toFixed(1),
+          sugar: +(food.sugar * factor).toFixed(1),
+          fiber: +(food.fiber * factor).toFixed(1),
+        },
       });
     }
 
-    const normalizedName = normalizeFoodName(foodName);
-    if (!normalizedName) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid food name",
+    /* =====================================================
+       TRY RAW FOOD — VIA AI
+    ===================================================== */
+    const aiResult = await fetchRawNutritionFromAI(normalized);
+
+    if (aiResult.status === "ok") {
+      food = await Calorie.findOneAndUpdate(
+        { foodKey },
+        {
+          $setOnInsert: {
+            ...aiResult.data,
+            foodKey,
+            foodName: normalized,
+            foodCategory: "natural",
+            baseQuantityInGrams: 100,
+            averagePieceWeight: { value: null, confidence: 0 },
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      let grams;
+      try {
+        grams = unitToGrams({ foodDoc: food, unit, quantity });
+      } catch (err) {
+        if (err.message === "PIECE_WEIGHT_REQUIRED") {
+          return res.status(422).json({
+            success: false,
+            code: "PIECE_WEIGHT_REQUIRED",
+            message: "Piece weight required for this food",
+            suggestions: [
+              { label: "Small", grams: 120 },
+              { label: "Medium", grams: 180 },
+              { label: "Large", grams: 250 },
+            ],
+            default: 180,
+          });
+        }
+        throw err;
+      }
+
+      if (grams == null) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid unit for raw food" });
+      }
+
+      const factor = grams / 100;
+
+      return res.json({
+        success: true,
+        type: "raw",
+        source: "ai",
+        info: `Nutrition calculated for ${grams} g of raw ${food.foodName}`,
+        data: {
+          foodName: food.foodName,
+          grams,
+          calories: +(food.calories * factor).toFixed(1),
+          protein: +(food.protein * factor).toFixed(1),
+          carbs: +(food.carbs * factor).toFixed(1),
+          fats: +(food.fats * factor).toFixed(1),
+          sugar: +(food.sugar * factor).toFixed(1),
+          fiber: +(food.fiber * factor).toFixed(1),
+        },
       });
     }
 
-    /* ---------- FOOD LOOKUP ---------- */
-    let source = "db";
-    let food = await Calorie.findOne({ foodName: normalizedName });
+    /* =====================================================
+       GENERIC COMPOSED FOOD — ESTIMATE ONLY
+    ===================================================== */
+    const servings =
+      Number.isFinite(+quantity) && +quantity > 0 ? +quantity : 1;
 
-    // 🔹 Nutrition AI only once per food
+    const weightUnits = ["g", "kg", "ml", "l"];
+    const usedWeightUnit = weightUnits.includes((unit || "").toLowerCase());
+
+    let warningMessage;
+
+    if (usedWeightUnit) {
+      warningMessage =
+        "Cooked food estimate: Weight units (g/kg/ml) are not applicable for cooked foods. Showing nutrition for normal serving(s) instead.";
+    } else {
+      warningMessage =
+        "Estimated nutrition for a normal cooked food. Actual values may vary based on size, oil, and preparation.";
+    }
+
+    return res.json({
+      success: true,
+      type: "generic_composed",
+      quantity: servings,
+      unit: "serving",
+      warning: warningMessage,
+      info: `Nutrition shown for ${servings} normal serving(s)`,
+      data: {
+        calories: 250 * servings,
+        protein: 10 * servings,
+        carbs: 35 * servings,
+        fats: 9 * servings,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error" });
+  }
+};
+
+
+
+exports.setPieceWeight = async (req, res) => {
+  const normalize = (str) =>
+  str.toLowerCase().trim().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ");
+  try {
+    const { foodName, grams } = req.body;
+
+    if (!foodName || !grams || grams <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Food name and valid grams are required",
+      });
+    }
+
+    // 🧹 normalize
+    const normalized = normalize(foodName);
+    const foodKey = `${normalized}__per100g`;
+
+    const food = await Calorie.findOne({ foodKey });
+
     if (!food) {
-      const aiData = await fetchNutritionFromAI(normalizedName);
-      console.log("AI Nutrition Data:", aiData);
-      if (!aiData) {
-        return res.status(404).json({
-          success: false,
-          message: "Food not found",
-        });
-      }
-
-      food = await Calorie.create(aiData);
-      source = "ai";
-    }
-
-    /* ---------- UNIT → GRAMS ---------- */
-    let quantityInGrams;
-    try {
-      quantityInGrams = await unitToGrams({
-        foodDoc: food,
-        unit,
-        quantity,
+      return res.status(404).json({
+        success: false,
+        message: "Food not found",
       });
-    } catch (err) {
-      if (err.message === "PIECE_WEIGHT_REQUIRED") {
-        return res.status(422).json({
-          success: false,
-          requireWeightInput: true,
-          message: "1 piece ka approx weight grams me bataye",
-        });
-      }
-      throw err;
     }
 
-    if (!quantityInGrams || quantityInGrams <= 0) {
+    // 🔒 only for NATURAL foods
+    if (food.foodCategory !== "natural") {
       return res.status(400).json({
         success: false,
-        message: "Invalid unit or quantity",
+        message: "Piece weight applicable only for natural foods",
       });
     }
 
-    /* ---------- SCALE ---------- */
-    const factor = quantityInGrams / food.baseQuantityInGrams;
+    // 🧠 confidence-based update
+    const oldValue = food.averagePieceWeight.value;
+    const oldConfidence = food.averagePieceWeight.confidence || 0;
+
+    // safety bounds (important)
+    if (grams < 1 || grams > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "Unrealistic piece weight",
+      });
+    }
+
+    let newValue;
+    let newConfidence;
+
+    if (!oldValue) {
+      newValue = grams;
+      newConfidence = 1;
+    } else {
+      newValue =
+        (oldValue * oldConfidence + grams) / (oldConfidence + 1);
+      newConfidence = Math.min(oldConfidence + 1, 20);
+    }
+
+    food.averagePieceWeight.value = Math.round(newValue);
+    food.averagePieceWeight.confidence = newConfidence;
+
+    await food.save();
 
     return res.status(200).json({
       success: true,
-      message: "Nutrition data fetched successfully",
+      message: "Piece weight saved",
       data: {
         foodName: food.foodName,
-        quantityInGrams,
-        unitUsed: unit,
-
-        calories: +(food.calories * factor).toFixed(2),
-        protein: +(food.protein * factor).toFixed(2),
-        carbs: +(food.carbs * factor).toFixed(2),
-        fats: +(food.fats * factor).toFixed(2),
-        sugar: +(food.sugar * factor).toFixed(2),
-        fiber: +(food.fiber * factor).toFixed(2),
-
-        // 🔥 CONFIRM CACHE
-        averagePieceWeight: food.averagePieceWeight || null,
-        source,
+        pieceWeight: food.averagePieceWeight.value,
+        confidence: food.averagePieceWeight.confidence,
       },
     });
-  } catch (error) {
-    console.error("searchFood error:", error);
+
+  } catch (err) {
+    console.error("setPieceWeight error:", err);
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Server error",
     });
   }
-}; 
+};
+
+
+
+

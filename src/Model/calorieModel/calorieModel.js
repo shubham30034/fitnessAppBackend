@@ -1,34 +1,60 @@
 // Model/calorieModel/calorieModel.js
 const mongoose = require("mongoose");
 
+const PortionSchema = new mongoose.Schema(
+  {
+    label: String,          // "1 slice", "half plate"
+    grams: Number,          // approx grams
+  },
+  { _id: false }
+);
+
 const calorieSchema = new mongoose.Schema(
   {
+    // 🔑 internal identity
+    foodKey: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+
     foodName: {
       type: String,
       required: true,
-      trim: true,
       lowercase: true,
-      unique: true,
+      trim: true,
     },
 
-    // Nutrition always per 100g
+    // 🔥 BEHAVIOR TYPE (THIS SOLVES INFINITE FOODS)
+    foodCategory: {
+      type: String,
+      enum: ["natural", "composed", "packaged"],
+      required: true,
+    },
+
     baseQuantityInGrams: {
       type: Number,
-      required: true,
       default: 100,
     },
 
-    calories: { type: Number, required: true },
-    protein: { type: Number, required: true },
-    carbs: { type: Number, required: true },
-    fats: { type: Number, required: true },
-    sugar: { type: Number, required: true },
-    fiber: { type: Number, required: true },
+    calories: Number,
+    protein: Number,
+    carbs: Number,
+    fats: Number,
+    sugar: Number,
+    fiber: Number,
 
-    // 🔥 THIS IS THE CACHE (CRITICAL)
+    // 🔹 ONLY FOR natural foods
     averagePieceWeight: {
-      type: Number, // grams per piece
-      default: null,
+      value: { type: Number, default: null },
+      confidence: { type: Number, default: 0 },
+    },
+
+    // 🔹 ONLY FOR composed foods
+    portions: {
+      type: [PortionSchema],
+      default: [],
     },
   },
   { timestamps: true }

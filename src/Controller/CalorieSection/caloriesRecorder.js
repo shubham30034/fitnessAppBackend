@@ -1,192 +1,212 @@
-// Controller/CalorieSection/caloriesRecorder.js
-
-const Calorie = require("../../Model/calorieModel/calorieModel");
 const CalorieRecord = require("../../Model/calorieModel/caloriesRecorder");
-
-const { fetchNutritionFromAI } = require("../../services/nutritionSection/aiNutrition");
+const Calorie = require("../../Model/calorieModel/calorieModel");
 const { unitToGrams } = require("../../Utils/unitToGram");
+const {
+  fetchRawNutritionFromAI,
+} = require("../../services/nutritionSection/aiNutrition");
 
-/* =========================
-   DATE HELPERS (FIXED)
-========================= */
+/* ================= HELPERS ================= */
 
-const getTodayDateString = () => {
+const normalize = (str) =>
+  str.toLowerCase().trim().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ");
+
+const todayString = () => new Date().toISOString().split("T")[0];
+
+const todayExpiry = () => {
   const d = new Date();
-  return d.toISOString().split("T")[0];
-};
-
-const getNextMidnight = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(0, 0, 0, 0);
+  d.setHours(23, 59, 59, 999);
   return d;
 };
 
-/* =========================
-   RECORD DAILY CALORIES
-========================= */
-exports.recordDailyCalories = async (req, res) => {
+const allowedMeals = ["breakfast", "lunch", "dinner", "snacks"];
+
+/* ======================================================
+   ADD FOOD TO DAY (DB + AI + UNIT + COMPOSED HANDLED)
+====================================================== */
+exports.addFoodToDay = async (req, res) => {
   try {
     const userId = req.user?.id;
-    const { foodName, quantity = 1, unit = "g", mealType } = req.body;
+    if (!userId) return res.status(401).json({ success: false });
 
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
+    const { foodName, mealType, quantity, unit } = req.body;
 
-    const allowedMeals = ["breakfast", "lunch", "dinner", "snacks"];
-    if (!foodName || !allowedMeals.includes(mealType)) {
+    if (!foodName || !allowedMeals.includes(mealType) || !quantity) {
       return res.status(400).json({
         success: false,
-        message: "Invalid foodName or mealType",
+        message: "Invalid input",
       });
     }
 
-    const normalizedFoodName = foodName.toLowerCase().trim();
+    const normalized = normalize(foodName);
+    const foodKey = `${normalized}__per100g`;
 
-    /* ---------- FOOD LOOKUP ---------- */
-    let food = await Calorie.findOne({ foodName: normalizedFoodName });
+    let grams,
+      calories,
+      protein = 0,
+      carbs = 0,
+      fats = 0,
+      sugar = 0,
+      fiber = 0,
+      isEstimated = false;
 
-    if (!food) {
-      const aiFood = await fetchNutritionFromAI(normalizedFoodName);
-      if (!aiFood) {
-        return res.status(404).json({
-          success: false,
-          message: "Food not found",
-        });
+    /* ================= RAW FOOD (DB FIRST) ================= */
+    let food = await Calorie.findOne({ foodKey });
+
+    if (food && food.foodCategory === "natural") {
+      grams = unitToGrams({ foodDoc: food, unit, quantity });
+      if (grams == null)
+        return res.status(400).json({ success: false, message: "Invalid unit" });
+
+      const factor = grams / 100;
+      calories = food.calories * factor;
+      protein = food.protein * factor;
+      carbs = food.carbs * factor;
+      fats = food.fats * factor;
+      sugar = food.sugar * factor;
+      fiber = food.fiber * factor;
+    } else {
+      /* ================= TRY AI FOR RAW ================= */
+      const aiResult = await fetchRawNutritionFromAI(normalized);
+
+      if (aiResult.status === "ok") {
+        food = await Calorie.findOneAndUpdate(
+          { foodKey },
+          {
+            $setOnInsert: {
+              ...aiResult.data,
+              foodKey,
+              foodName: normalized,
+              foodCategory: "natural",
+              baseQuantityInGrams: 100,
+            },
+          },
+          { upsert: true, new: true }
+        );
+
+        grams = unitToGrams({ foodDoc: food, unit, quantity });
+        if (grams == null)
+          return res
+            .status(400)
+            .json({ success: false, message: "Invalid unit" });
+
+        const factor = grams / 100;
+        calories = food.calories * factor;
+        protein = food.protein * factor;
+        carbs = food.carbs * factor;
+        fats = food.fats * factor;
+        sugar = food.sugar * factor;
+        fiber = food.fiber * factor;
+      } else {
+        /* ================= COMPOSED FOOD ================= */
+        isEstimated = true;
+
+        const servings = Number(quantity) > 0 ? Number(quantity) : 1;
+        const baseGrams = 180;
+
+        grams = baseGrams * servings;
+        calories = 250 * servings;
+        protein = 10 * servings;
+        carbs = 35 * servings;
+        fats = 9 * servings;
       }
-      food = await Calorie.create(aiFood);
     }
 
-    /* ---------- UNIT → GRAMS (STRICT + CACHED) ---------- */
-    let grams;
-    try {
-      grams = await unitToGrams({
-        foodDoc: food,
-        unit,
-        quantity,
-      });
-    } catch (err) {
-      if (err.message === "PIECE_WEIGHT_REQUIRED") {
-        return res.status(422).json({
-          success: false,
-          requireWeightInput: true,
-          message: "1 piece ka approx weight grams me bataye",
-        });
-      }
-      throw err;
-    }
-
-    if (!grams || grams <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid quantity or unit",
-      });
-    }
-
-    /* ---------- SCALE NUTRITION ---------- */
-    const factor = grams / food.baseQuantityInGrams;
-
-    const foodItem = {
-      foodName: food.foodName,
-      quantityInGrams: grams,
-      calories: +(food.calories * factor).toFixed(2),
-      protein: +(food.protein * factor).toFixed(2),
-      carbs: +(food.carbs * factor).toFixed(2),
-      fats: +(food.fats * factor).toFixed(2),
-      sugar: +(food.sugar * factor).toFixed(2),
-      fiber: +(food.fiber * factor).toFixed(2),
-    };
-
-    /* ---------- DAILY RECORD ---------- */
-    const today = getTodayDateString();
+    /* ================= DAILY LOG ================= */
+    const today = todayString();
     let record = await CalorieRecord.findOne({ userId, date: today });
 
     if (!record) {
-      record = new CalorieRecord({
+      record = await CalorieRecord.create({
         userId,
         date: today,
-        foods: { breakfast: [], lunch: [], dinner: [], snacks: [] },
-        totals: { calories: 0, protein: 0, carbs: 0, fats: 0, sugar: 0, fiber: 0 },
-        expiresAt: getNextMidnight(),
+        expiresAt: todayExpiry(),
       });
     }
 
-    record.foods[mealType].push(foodItem);
+    record.foods[mealType].push({
+      foodName: normalized,
+      quantityInGrams: Math.round(grams),
+      calories: Math.round(calories),
+      protein: +protein.toFixed(1),
+      carbs: +carbs.toFixed(1),
+      fats: +fats.toFixed(1),
+      sugar: +sugar.toFixed(1),
+      fiber: +fiber.toFixed(1),
+      isEstimated,
+    });
 
-    record.totals.calories += foodItem.calories;
-    record.totals.protein += foodItem.protein;
-    record.totals.carbs += foodItem.carbs;
-    record.totals.fats += foodItem.fats;
-    record.totals.sugar += foodItem.sugar;
-    record.totals.fiber += foodItem.fiber;
+    record.totals.calories += calories;
+    record.totals.protein += protein;
+    record.totals.carbs += carbs;
+    record.totals.fats += fats;
+    record.totals.sugar += sugar;
+    record.totals.fiber += fiber;
 
-    record.expiresAt = getNextMidnight();
     await record.save();
 
-    return res.status(200).json({
+    return res.status(201).json({
       success: true,
-      message: "Food recorded successfully",
+      message: "Food added",
+      isEstimated,
       data: record,
-      meta: {
-        averagePieceWeight: food.averagePieceWeight || null,
-      },
     });
-  } catch (error) {
-    console.error("recordDailyCalories error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+  } catch (err) {
+    console.error("addFoodToDay error:", err);
+    return res.status(500).json({ success: false });
   }
 };
 
-/* =========================
+/* ======================================================
    GET TODAY CALORIES
-========================= */
+====================================================== */
 exports.getTodayCalories = async (req, res) => {
   try {
     const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ success: false });
-    }
+    if (!userId) return res.status(401).json({ success: false });
 
-    const today = getTodayDateString();
+    const today = todayString();
     const record = await CalorieRecord.findOne({ userId, date: today });
 
     if (!record) {
-      return res.status(200).json({
+      return res.json({
         success: true,
         date: today,
-        totals: null,
-        foods: null,
+        totals: {
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fats: 0,
+          sugar: 0,
+          fiber: 0,
+        },
+        foods: {
+          breakfast: [],
+          lunch: [],
+          dinner: [],
+          snacks: [],
+        },
       });
     }
 
-    return res.status(200).json({
+    return res.json({
       success: true,
       date: today,
       totals: record.totals,
       foods: record.foods,
     });
-  } catch (error) {
-    console.error("getTodayCalories error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+  } catch (err) {
+    console.error("getTodayCalories error:", err);
+    return res.status(500).json({ success: false });
   }
 };
 
-/* =========================
+/* ======================================================
    REMOVE FOOD ITEM
-========================= */
+====================================================== */
 exports.removeFoodItem = async (req, res) => {
   try {
     const userId = req.user?.id;
     const { mealType, foodItemId } = req.body;
-
-    const allowedMeals = ["breakfast", "lunch", "dinner", "snacks"];
 
     if (!userId || !allowedMeals.includes(mealType) || !foodItemId) {
       return res.status(400).json({
@@ -195,50 +215,59 @@ exports.removeFoodItem = async (req, res) => {
       });
     }
 
-    const today = getTodayDateString();
+    const today = todayString();
     const record = await CalorieRecord.findOne({ userId, date: today });
 
     if (!record) {
-      return res.status(404).json({
-        success: false,
-        message: "No record found for today",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "No record found" });
     }
 
-    const foodArray = record.foods[mealType];
-    const itemIndex = foodArray.findIndex(
-      (item) => item._id.toString() === foodItemId
+    const list = record.foods[mealType];
+    const index = list.findIndex(
+      (f) => f._id.toString() === foodItemId
     );
 
-    if (itemIndex === -1) {
-      return res.status(404).json({
-        success: false,
-        message: "Food item not found",
-      });
+    if (index === -1) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Food not found" });
     }
 
-    const [removed] = foodArray.splice(itemIndex, 1);
+    const [removed] = list.splice(index, 1);
 
-    // 🔽 Safe totals update
-    record.totals.calories = Math.max(0, +(record.totals.calories - removed.calories).toFixed(2));
-    record.totals.protein  = Math.max(0, +(record.totals.protein  - removed.protein ).toFixed(2));
-    record.totals.carbs    = Math.max(0, +(record.totals.carbs    - removed.carbs   ).toFixed(2));
-    record.totals.fats     = Math.max(0, +(record.totals.fats     - removed.fats    ).toFixed(2));
-    record.totals.sugar    = Math.max(0, +(record.totals.sugar    - removed.sugar   ).toFixed(2));
-    record.totals.fiber    = Math.max(0, +(record.totals.fiber    - removed.fiber   ).toFixed(2));
+    record.totals.calories = Math.max(
+      0,
+      record.totals.calories - removed.calories
+    );
+    record.totals.protein = Math.max(
+      0,
+      record.totals.protein - removed.protein
+    );
+    record.totals.carbs = Math.max(
+      0,
+      record.totals.carbs - removed.carbs
+    );
+    record.totals.fats = Math.max(0, record.totals.fats - removed.fats);
+    record.totals.sugar = Math.max(
+      0,
+      record.totals.sugar - removed.sugar
+    );
+    record.totals.fiber = Math.max(
+      0,
+      record.totals.fiber - removed.fiber
+    );
 
     await record.save();
 
     return res.json({
       success: true,
-      message: "Food item removed successfully",
+      message: "Food removed",
       data: record,
     });
-  } catch (error) {
-    console.error("removeFoodItem error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+  } catch (err) {
+    console.error("removeFoodItem error:", err);
+    return res.status(500).json({ success: false });
   }
 };

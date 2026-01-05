@@ -1,47 +1,28 @@
 // Utils/unitToGram.js
-const { fetchPieceWeightFromAI } = require("../services/nutritionSection/aiPieceWeights");
 
-exports.unitToGrams = async ({ foodDoc, unit, quantity }) => {
+exports.unitToGrams = ({ foodDoc, unit, quantity }) => {
   const qty = Number(quantity);
-  if (!qty || qty <= 0) return null;
+  if (!Number.isFinite(qty) || qty <= 0) return null;
 
-  const unitMap = {
-    g: 1,
-    gram: 1,
-    grams: 1,
-    kg: 1000,
-    ml: 1,
-    litre: 1000,
-    cup: 240,
-    tbsp: 15,
-    tsp: 5,
-  };
+  if (!foodDoc || foodDoc.foodCategory !== "natural") return null;
 
-  const u = unit.toLowerCase();
+  const u = (unit || "").toLowerCase();
 
-  // ✅ Normal units
-  if (unitMap[u]) {
-    return qty * unitMap[u];
-  }
+  // weight units
+  if (["g", "gram", "grams"].includes(u)) return qty;
+  if (["kg", "kgs"].includes(u)) return qty * 1000;
 
-  // 🔥 PIECE LOGIC (NO REPEAT AI)
-  if (u === "piece" || u === "pcs") {
-    // 1️⃣ Already cached
-    if (foodDoc.averagePieceWeight) {
-      return qty * foodDoc.averagePieceWeight;
-    }
+  // volume units (liquids)
+  if (["ml", "milliliter", "milliliters"].includes(u)) return qty;
+  if (["l", "liter", "liters"].includes(u)) return qty * 1000;
 
-    // 2️⃣ First time → AI
-    const aiWeight = await fetchPieceWeightFromAI(foodDoc.foodName);
-    if (!aiWeight) {
+  // pieces
+  if (["piece", "pcs", "pc", "pieces"].includes(u)) {
+    const pieceWeight = foodDoc.averagePieceWeight?.value;
+    if (!pieceWeight) {
       throw new Error("PIECE_WEIGHT_REQUIRED");
     }
-
-    // 3️⃣ SAVE ONCE
-    foodDoc.averagePieceWeight = aiWeight;
-    await foodDoc.save();
-
-    return qty * aiWeight;
+    return qty * pieceWeight;
   }
 
   return null;
