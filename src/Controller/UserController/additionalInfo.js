@@ -1,16 +1,27 @@
-const UserAdditionalInfo = require('../../Model/userModel/additionalInfo');
-const User = require('../../Model/userModel/userModel');
-const fs = require('fs');
-const path = require('path');
-const {additionalInfoValidate} = require("../../validator/loginValidation")
+const UserAdditionalInfo = require("../../Model/userModel/additionalInfo");
+const User = require("../../Model/userModel/userModel");
+const fs = require("fs");
+const path = require("path");
+const { additionalInfoValidate } = require("../../validator/loginValidation");
 
-// CREATE Additional Info
+const {
+  optimizeProfilePicture,
+  cleanupOldImages,
+  generateProfileUrls,
+  validateImageFile,
+  isSharpAvailable,
+  generateFallbackResponsiveImages,
+} = require("../../Utils/imageOptimizer");
+
+/* =====================================================
+   CREATE ADDITIONAL INFO (ONE TIME)
+===================================================== */
 exports.createAdditionalInfo = async (req, res) => {
   try {
     const userId = req.user.id;
     const { name, email, address } = req.body;
 
-    const {error} = await additionalInfoValidate({name,email,address})
+    const { error } = additionalInfoValidate({ name, email, address });
     if (error) {
       return res.status(400).json({
         success: false,
@@ -18,321 +29,264 @@ exports.createAdditionalInfo = async (req, res) => {
       });
     }
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    let existingInfo = await UserAdditionalInfo.findOne({ userId });
-
-    if (existingInfo) {
-      let updated = false;
-      if (!existingInfo.name && name) { existingInfo.name = name; updated = true; }
-      if (!existingInfo.email && email) { existingInfo.email = email; updated = true; }
-      if (!existingInfo.address && address) { existingInfo.address = address; updated = true; }
-
-      if (updated) {
-        await existingInfo.save();
-        if (!user.additionalInfo) {
-          user.additionalInfo = existingInfo._id;
-          await user.save();
-        }
-        return res.status(200).json({
-          success: true,
-          message: 'Additional info updated successfully',
-          data: existingInfo,
-        });
-      }
-
+    const existing = await UserAdditionalInfo.findOne({ userId });
+    if (existing) {
       return res.status(400).json({
         success: false,
-        message: 'Additional info already exists for this user',
+        message: "Additional info already exists. Use update instead.",
       });
     }
 
-    // Create new
-    const additionalInfo = new UserAdditionalInfo({ userId, name, email, address });
-    await additionalInfo.save();
+    const info = await UserAdditionalInfo.create({
+      userId,
+      name,
+      email,
+      address,
+    });
 
-    user.additionalInfo = additionalInfo._id;
-    await user.save();
+    await User.findByIdAndUpdate(userId, { additionalInfo: info._id });
 
     res.status(201).json({
       success: true,
-      message: 'Additional info created successfully',
-      data: additionalInfo,
+      message: "Additional info created successfully",
+      data: info,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error creating additional info',
+      message: "Failed to create additional info",
       error: error.message,
     });
   }
 };
 
-
-// UPDATE Additional Info
+/* =====================================================
+   UPDATE ADDITIONAL INFO
+===================================================== */
 exports.updateAdditionalInfo = async (req, res) => {
   try {
     const userId = req.user.id;
     const { name, email, address } = req.body;
 
-    console.log("update is running")
-
-    // Prepare update object with only provided fields
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
     if (address !== undefined) updateData.address = address;
 
-    if (Object.keys(updateData).length === 0) {
+    if (!Object.keys(updateData).length) {
       return res.status(400).json({
         success: false,
-        message: 'No valid fields provided for update',
+        message: "No valid fields provided",
       });
     }
 
-
-    // Update the provided fields only
     const updated = await UserAdditionalInfo.findOneAndUpdate(
       { userId },
       { $set: updateData },
-      { new: true }
+      { new: true, runValidators: true }
     );
 
     if (!updated) {
       return res.status(404).json({
         success: false,
-        message: 'User additional info not found',
+        message: "Additional info not found",
       });
     }
 
     res.status(200).json({
       success: true,
-      message: 'Additional info updated successfully',
+      message: "Additional info updated successfully",
       data: updated,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error updating additional info',
+      message: "Failed to update additional info",
       error: error.message,
     });
   }
 };
 
-
-// GET Additional Info
+/* =====================================================
+   GET ADDITIONAL INFO
+===================================================== */
 exports.getAdditionalInfo = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    const info = await UserAdditionalInfo.findOne({ userId }).populate({
+      path: "userId",
+      select: "phone",
+    });
 
-    if(!userId){
-      return res.status(400).json({
-        success:false,
-        message:"unable to find userId",
-      })
-    }
-
-    const additionalInfo = await UserAdditionalInfo.findOne({ userId })
-      .populate({ path: 'userId', select: 'phone' }); // profilePicture is string, no populate
-
-    if (!additionalInfo) {
-      return res.status(404).json({ success: false, message: 'Additional info not found' });
+    if (!info) {
+      return res.status(404).json({
+        success: false,
+        message: "Additional info not found",
+      });
     }
 
     res.status(200).json({
       success: true,
-      message: 'Additional info fetched successfully',
-      data: additionalInfo,
+      data: info,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error fetching additional info',
+      message: "Failed to fetch additional info",
       error: error.message,
     });
   }
 };
 
-
-// DELETE Additional Info
+/* =====================================================
+   DELETE ADDITIONAL INFO + FILES
+===================================================== */
 exports.deleteAdditionalInfo = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    
-    if(!userId){
-      return res.status(400).json({
-        success:false,
-        message:"unable to find userId",
-      })
+    const info = await UserAdditionalInfo.findOne({ userId });
+    if (!info) {
+      return res.status(404).json({
+        success: false,
+        message: "No additional info to delete",
+      });
     }
 
+    const userFolder = path.join(
+      __dirname,
+      `../../../uploads/profile/${userId}`
+    );
 
-    const additionalInfo = await UserAdditionalInfo.findOne({ userId });
-    if (!additionalInfo) {
-      return res.status(404).json({ success: false, message: 'No additional info found to delete' });
+    if (fs.existsSync(userFolder)) {
+      fs.rmSync(userFolder, { recursive: true, force: true });
     }
 
-    // Construct user profile folder path
-    const userProfileFolder = path.join(__dirname, `../../../uploads/profile/${userId}`);
-
-    // Check if folder exists and delete it recursively
-    if (fs.existsSync(userProfileFolder)) {
-      fs.rmSync(userProfileFolder, { recursive: true, force: true });
-    }
-
-    // Delete additional info document
-    await UserAdditionalInfo.findOneAndDelete({ userId });
-
-    // Remove reference from User model
-    await User.findByIdAndUpdate(userId, { $unset: { additionalInfo: '' } });
+    await UserAdditionalInfo.deleteOne({ userId });
+    await User.findByIdAndUpdate(userId, {
+      $unset: { additionalInfo: "" },
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Additional info and profile picture folder deleted successfully',
+      message: "Additional info deleted successfully",
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Error deleting additional info',
+      message: "Failed to delete additional info",
       error: error.message,
     });
   }
 };
 
-// UPLOAD Profile Picture with Mobile Optimization
+/* =====================================================
+   UPLOAD PROFILE PICTURE (LOCAL + OPTIMIZED)
+===================================================== */
 exports.uploadProfilePicture = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    if (!req.file || !req.file.filename) {
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
-    }
-
-    const filename = req.file.filename;
-    const filePath = req.file.path;
-    const uploadDir = path.dirname(filePath);
-
-    // Import image optimization utilities
-    const {
-      optimizeProfilePicture,
-      generateResponsiveUrls,
-      cleanupOldImages,
-      isSharpAvailable,
-      generateFallbackResponsiveImages
-    } = require('../../Utils/imageOptimizer');
-
-    // Generate optimized versions for mobile
-    let optimizedImages;
-    if (isSharpAvailable()) {
-      optimizedImages = await optimizeProfilePicture(filePath, uploadDir, filename);
-    } else {
-      console.log('Using fallback image processing (Sharp not available)');
-      optimizedImages = await generateFallbackResponsiveImages(filePath, uploadDir, filename);
-    }
-
-    let additionalInfo = await UserAdditionalInfo.findOne({ userId });
-
-    if (additionalInfo) {
-      // Clean up old images if they exist
-      if (additionalInfo.profilePicture) {
-        cleanupOldImages(uploadDir, additionalInfo.profilePicture);
-      }
-      
-      // Store the optimized image data
-      additionalInfo.profilePicture = filename;
-      additionalInfo.profilePictureSizes = optimizedImages; // Store all sizes
-      await additionalInfo.save();
-    } else {
-      additionalInfo = new UserAdditionalInfo({ 
-        userId, 
-        profilePicture: filename,
-        profilePictureSizes: optimizedImages
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
       });
-      await additionalInfo.save();
-
-      const user = await User.findById(userId);
-      if (user && !user.additionalInfo) {
-        user.additionalInfo = additionalInfo._id;
-        await user.save();
-      }
     }
 
-    // Generate responsive URLs for different screen sizes
-    const baseUrl = `/uploads/profile/${userId}`;
-    const responsiveUrls = generateResponsiveUrls(baseUrl, filename);
+    // validate
+    const validation = validateImageFile(req.file);
+    if (!validation.valid) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: validation.error,
+      });
+    }
 
-    res.status(200).json({
+    const uploadDir = path.dirname(req.file.path);
+    const filename = req.file.filename;
+
+    let info = await UserAdditionalInfo.findOne({ userId });
+
+    // ✅ delete OLD profile images (small + medium)
+    if (info?.profilePicture) {
+      cleanupOldImages(uploadDir, info.profilePicture);
+    }
+
+    // ✅ generate optimized images
+    const optimizedImages = await optimizeProfilePicture(
+      req.file.path,
+      uploadDir,
+      filename
+    );
+
+    // ✅ DELETE ORIGINAL IMAGE (IMPORTANT)
+    fs.unlinkSync(req.file.path);
+
+    if (!info) {
+      info = await UserAdditionalInfo.create({
+        userId,
+        profilePicture: filename, // base reference
+        profilePictureSizes: optimizedImages,
+      });
+
+      await User.findByIdAndUpdate(userId, {
+        additionalInfo: info._id,
+      });
+    } else {
+      info.profilePicture = filename;
+      info.profilePictureSizes = optimizedImages;
+      await info.save();
+    }
+
+    const urls = generateProfileUrls(userId, optimizedImages);
+
+    return res.status(200).json({
       success: true,
-      message: 'Profile picture uploaded and optimized successfully',
-      data: { 
-        profilePictureUrl: responsiveUrls.medium, // Default to medium size
-        responsiveUrls,
-        optimizedSizes: optimizedImages,
-        additionalInfo 
+      message: "Profile picture updated",
+      data: {
+        default: urls.medium,
+        responsive: urls,
       },
     });
 
   } catch (error) {
-    // Delete uploaded file if error occurs
-    if (req.file && req.file.filename) {
-      const errorFilePath = path.join(__dirname, `../../../uploads/profile/${req.user.id}/${req.file.filename}`);
-      if (fs.existsSync(errorFilePath)) fs.unlinkSync(errorFilePath);
-    }
-
-    console.error('Profile picture upload error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: 'Upload failed',
+      message: "Profile picture upload failed",
       error: error.message,
     });
   }
 };
 
-// Get optimized profile picture URLs
+
+/* =====================================================
+   GET PROFILE PICTURE URLS
+===================================================== */
 exports.getProfilePictureUrls = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { size = 'medium' } = req.query; // Default to medium size
 
-    const additionalInfo = await UserAdditionalInfo.findOne({ userId });
-
-    if (!additionalInfo || !additionalInfo.profilePicture) {
+    const info = await UserAdditionalInfo.findOne({ userId });
+    if (!info?.profilePictureSizes) {
       return res.status(404).json({
         success: false,
-        message: 'Profile picture not found'
+        message: "Profile picture not found",
       });
     }
 
-    const baseUrl = `/uploads/profile/${userId}`;
-    const responsiveUrls = {
-      thumbnail: `${baseUrl}/${additionalInfo.profilePictureSizes?.thumbnail || additionalInfo.profilePicture}`,
-      small: `${baseUrl}/${additionalInfo.profilePictureSizes?.small || additionalInfo.profilePicture}`,
-      medium: `${baseUrl}/${additionalInfo.profilePictureSizes?.medium || additionalInfo.profilePicture}`,
-      large: `${baseUrl}/${additionalInfo.profilePictureSizes?.large || additionalInfo.profilePicture}`,
-      original: `${baseUrl}/${additionalInfo.profilePictureSizes?.original || additionalInfo.profilePicture}`
-    };
+    const urls = generateProfileUrls(userId, info.profilePictureSizes);
 
     res.status(200).json({
       success: true,
-      data: {
-        currentSize: responsiveUrls[size] || responsiveUrls.medium,
-        allSizes: responsiveUrls,
-        selectedSize: size
-      }
+      data: urls,
     });
-
   } catch (error) {
-    console.error('Error fetching profile picture URLs:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
+      message: "Failed to fetch profile picture",
       error: error.message,
     });
   }

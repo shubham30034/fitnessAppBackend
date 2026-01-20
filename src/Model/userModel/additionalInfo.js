@@ -4,6 +4,12 @@ const userAdditionalInfoSchema = new mongoose.Schema({
   name: {
     type: String,
   },
+  email: {
+  type: String,
+  lowercase: true,
+  trim: true,
+  sparse: true,
+},
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

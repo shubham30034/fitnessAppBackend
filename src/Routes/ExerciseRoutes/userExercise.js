@@ -28,7 +28,7 @@ router.patch('/set', authentication, updateSet);
 router.get('/set', authentication, getRecordedSets);
 router.get('/set/previous-sets', authentication, previousWorkOutOfExercise);
 router.get('/set/today', authentication, getExerciseRepsToday);
-router.get('/sets/by-date', authentication, getSetsByDate);
+router.get('/set/by-date', authentication, getSetsByDate);
 router.get('/set/compare',authentication,compareTodayWithPreviousWorkout)
 
 // Analytics Routes

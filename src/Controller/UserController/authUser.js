@@ -1,384 +1,245 @@
 const User = require('../../Model/userModel/userModel');
-// const UserAdditionalInfo = require('../../Model/userModel/userAdditionalInfo');
 const RefreshToken = require('../../Model/userModel/refreshToken');
-const {generateToken} = require('../../Utils/Jwt');
-const bcrypt = require('bcrypt');
 const Otp = require('../../Model/userModel/otpModel');
-const jwt = require('jsonwebtoken');
-const axios = require('axios');
-const {sendOtpValidation,verifyOtpValidation} = require("../../validator/loginValidation")
-
 const BlacklistedToken = require('../../Model/userModel/blackListedToken');
+
+const { generateToken } = require('../../Utils/Jwt');
+const { sendOtpValidation, verifyOtpValidation } = require("../../validator/loginValidation");
+
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
+/* =====================================================
+   HELPERS
+===================================================== */
 
+const generateNumericOtp = () =>
+  Math.floor(1000 + Math.random() * 9000).toString();
 
-const sendOtpToUser = async (user, phone) => {
-  const generateNumericOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
-  const otp = generateNumericOtp();
-  console.log("Generated OTP (numeric only):", otp);
+const hashToken = (token) => bcrypt.hash(token, 10);
+const compareToken = (token, hash) => bcrypt.compare(token, hash);
 
-  const hashedOtp = await bcrypt.hash(otp, 10);
-  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-  const saveOtp  = await Otp.create({
-    userId: user._id,
-    otp: hashedOtp,
-    expiresAt: otpExpiresAt,
-  });
-
-
-  if(!saveOtp) {
-    console.error('Failed to save OTP to database');
-    return null;
-  }
-
-
-
-  return otp
-  // const data = {
-  //   route: 'q', // transactional route
-  //   message: `Your OTP is ${otp}. It is valid for 10 minutes.`,
-  //   flash: 0,
-  //   numbers: phone
-  // };
-
-  // try {
-  //   const response = await axios.post(
-  //     'https://www.fast2sms.com/dev/bulkV2',
-  //     data,
-  //     {
-  //       headers: {
-  //         authorization: process.env.FAST2SMS_API_KEY,
-  //         'Content-Type': 'application/json'
-  //       }
-  //     }
-  //   );
-
-  //   console.log('Fast2SMS response:', response.data);
-
-  //   if (!response.data.return) {
-  //     console.error('Failed to send OTP. Response:', response.data);
-  //     return null;
-  //   }
-
-  //   return response.data;
-
-  // } catch (error) {
-  //   console.error('Axios/Fast2SMS Error:', error.response?.data || error.message);
-  //   return null;
-  // }
-};
-
-
-
-// Controller: Send OTP
+/* =====================================================
+   SEND OTP
+===================================================== */
 exports.sendOtp = async (req, res) => {
   try {
     const { phone } = req.body;
 
-    // ✅ Step 0: Validate phone
-    const {error} = sendOtpValidation({phone})
-
+    const { error } = sendOtpValidation({ phone });
     if (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.details[0].message,
-      });
+      return res.status(400).json({ success: false, message: error.details[0].message });
     }
 
-    // ✅ Step 1: Find or create user
-    let user = await User.findOne({ phone }).populate('additionalInfo');
+    let user = await User.findOne({ phone });
     if (!user) {
       user = await User.create({ phone, role: 'user' });
     }
 
     if (user.role !== 'user') {
-      return res.status(403).json({
-        success: false,
-        message: 'Only users with role "user" can request OTP',
-      });
+      return res.status(403).json({ success: false, message: 'Invalid role for OTP login' });
     }
 
-    // ✅ Step 2: Enforce 60s cooldown
+    // cooldown 60s
     const recentOtp = await Otp.findOne({
       userId: user._id,
       createdAt: { $gt: new Date(Date.now() - 60 * 1000) }
     });
 
     if (recentOtp) {
-      const secondsRemaining = Math.ceil((recentOtp.createdAt.getTime() + 60 * 1000 - Date.now()) / 1000);
       return res.status(429).json({
         success: false,
-        message: `Please wait ${secondsRemaining} seconds before requesting a new OTP`,
+        message: 'Please wait before requesting another OTP',
       });
     }
 
-    // ✅ Step 3: Clean old OTPs
     await Otp.deleteMany({ userId: user._id });
 
-    // ✅ Step 4: Generate & send OTP
-    const otp = await sendOtpToUser(user, phone);
-    if (!otp) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send OTP',
-      });
-    }
+    const otp = generateNumericOtp();
+    const hashedOtp = await bcrypt.hash(otp, 10);
 
-    // ⚠️ Log OTP only in dev mode
-    res.status(200).json({
+    await Otp.create({
+      userId: user._id,
+      otp: hashedOtp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+
+    const response = {
       success: true,
       message: 'OTP sent successfully',
-      otp, // ❗ remove in production
-    });
+    };
+
+    // ⚠️ DEV ONLY
+    if (process.env.NODE_ENV !== 'production') {
+      response.otp = otp;
+    }
+
+    return res.status(200).json(response);
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error sending OTP',
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: 'OTP send failed', error: error.message });
   }
 };
 
-
-
-
-// Verify OTP
+/* =====================================================
+   VERIFY OTP / LOGIN
+===================================================== */
 exports.verifyOtp = async (req, res) => {
   try {
     const { phone, otp } = req.body;
 
-   const {error} = verifyOtpValidation({phone,otp})
-
+    const { error } = verifyOtpValidation({ phone, otp });
     if (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.details[0].message,
-      });
+      return res.status(400).json({ success: false, message: error.details[0].message });
     }
 
     const user = await User.findOne({ phone }).populate('additionalInfo');
-    console.log("User found:", user);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    if (user.role !== 'user') {
-      return res.status(403).json({ success: false, message: 'Only users with role \"user\" can log in' });
+    const otpDoc = await Otp.findOne({ userId: user._id }).sort({ createdAt: -1 });
+
+    if (!otpDoc || new Date() > otpDoc.expiresAt) {
+      return res.status(400).json({ success: false, message: 'OTP expired or invalid' });
     }
 
-    // ✅ Rate limiting: Check for recent failed attempts
-    const recentFailedAttempts = await Otp.countDocuments({
-      userId: user._id,
-      isFailedAttempt: true,
-      createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) } // 15 minutes
-    });
-
-    if (recentFailedAttempts >= 5) {
-      return res.status(429).json({
-        success: false,
-        message: 'Too many failed attempts. Please wait 15 minutes before trying again.',
-      });
-    }
-
-    // ✅ Always fetch latest OTP
-    const userOtp = await Otp.findOne({ userId: user._id }).sort({ createdAt: -1 });
-
-    console.log("Fetched OTP:", userOtp);
-    console.log("Current time:", new Date());
-    console.log("OTP expiry:", userOtp?.expiresAt);
-
-    if (!userOtp || new Date() > userOtp.expiresAt) {
-      // Mark as failed attempt
-      await Otp.create({
-        userId: user._id,
-        otp: 'failed',
-        expiresAt: new Date(),
-        isFailedAttempt: true
-      });
-      
-      return res.status(400).json({
-        success: false,
-        message: 'OTP has expired or not found, please request a new one',
-      });
-    }
-
-    const isMatch = await bcrypt.compare(otp, userOtp.otp);
-    if (!isMatch) {
-      // Mark as failed attempt
-      await Otp.create({
-        userId: user._id,
-        otp: 'failed',
-        expiresAt: new Date(),
-        isFailedAttempt: true
-      });
-      
+    const isValid = await bcrypt.compare(otp, otpDoc.otp);
+    if (!isValid) {
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
-    await Otp.deleteOne({ _id: userOtp._id }); // remove used OTP
+    await Otp.deleteMany({ userId: user._id });
 
-    // 🔐 Generate JWT
     const payload = { id: user._id, role: user.role };
     const { accessToken, refreshToken } = await generateToken(payload);
 
-    // delete Old RefreshToken 
-   await RefreshToken.deleteOne({ userId: user._id });
+    const hashedRefresh = await hashToken(refreshToken);
 
-const createRefreshToken = await RefreshToken.create({ 
-  userId: user._id, 
-  token: refreshToken 
-});
+    await RefreshToken.deleteMany({ userId: user._id });
+    await RefreshToken.create({ userId: user._id, token: hashedRefresh });
 
     res.status(200).json({
       success: true,
-      message: 'OTP verified successfully, you are logged in',
+      message: 'Logged in successfully',
       user: {
         id: user._id,
         phone: user.phone,
-        email: user.additionalInfo?.email || 'Not Provided',
+        name: user.additionalInfo?.name || '',
+        email: user.additionalInfo?.email || '',
         role: user.role,
-        tokens: { accessToken, refreshToken },
       },
+      tokens: { accessToken, refreshToken },
     });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error verifying OTP',
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: 'OTP verification failed', error: error.message });
   }
 };
 
-
-
-// Regenerate Refresh Token
+/* =====================================================
+   REFRESH TOKEN
+===================================================== */
 exports.regenerateRefreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-
     if (!refreshToken) {
-      return res.status(400).json({ success: false, message: 'Refresh token is required' });
+      return res.status(400).json({ success: false, message: 'Refresh token required' });
     }
 
-    // Verify refresh token with the refresh secret, not the access secret
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
-    if (!decoded) {
-      return res.status(400).json({ success: false, message: 'Invalid refresh token' });
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
+    } catch {
+      return res.status(401).json({ success: false, message: 'Invalid refresh token' });
     }
 
-    const existingToken = await RefreshToken.findOne({ token: refreshToken });
-    if (!existingToken) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired refresh token' });
+    const savedToken = await RefreshToken.findOne({ userId: decoded.id });
+    if (!savedToken) {
+      return res.status(401).json({ success: false, message: 'Session expired' });
     }
 
-    // Delete old token
-    await RefreshToken.deleteOne({ token: refreshToken });
+    const isMatch = await compareToken(refreshToken, savedToken.token);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid refresh token' });
+    }
 
-    const payload = { id: decoded.id || decoded.userId, role: decoded.role };
-    const { accessToken, refreshToken: newRefreshToken } = await generateToken(payload);
+    await RefreshToken.deleteOne({ _id: savedToken._id });
 
-    await RefreshToken.create({ userId: payload.id, token: newRefreshToken });
+    const payload = { id: decoded.id, role: decoded.role };
+    const { accessToken, refreshToken: newRefresh } = await generateToken(payload);
+
+    const hashedNew = await hashToken(newRefresh);
+    await RefreshToken.create({ userId: decoded.id, token: hashedNew });
 
     res.status(200).json({
       success: true,
-      message: 'Tokens regenerated successfully',
       accessToken,
-      refreshToken: newRefreshToken,
+      refreshToken: newRefresh,
     });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error regenerating refresh token', error: error.message });
+    res.status(500).json({ success: false, message: 'Token refresh failed', error: error.message });
   }
 };
 
-// Logout
+/* =====================================================
+   LOGOUT
+===================================================== */
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
+    const accessToken = req.headers.authorization?.split(' ')[1];
 
-  
-
-    const token = req.headers.authorization?.split(' ')[1]; // Correct extraction
-   const accessToken = token
-
-  
     if (!refreshToken || !accessToken) {
-      return res.status(400).json({
-        success: false,
-        message: 'Refresh token and access token are required',
+      return res.status(400).json({ success: false, message: 'Tokens required' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
+    } catch {
+      decoded = null;
+    }
+
+    await RefreshToken.deleteMany({ userId: decoded?.id });
+
+    if (decoded?.exp) {
+      await BlacklistedToken.create({
+        token: accessToken,
+        expiresAt: new Date(decoded.exp * 1000),
       });
     }
 
-    // ❌ Delete refresh token from DB
-    const deleted = await RefreshToken.deleteOne({ token: refreshToken });
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
 
-  console.log(deleted,"deleted");
-  
-
-
-    if (deleted.deletedCount === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired refresh token',
-      });
-    }
-
-    // 🛑 Decode the access token and store in blacklist
-    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
-    const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    await BlacklistedToken.create({ token: accessToken, expiresAt });
-
-    res.status(200).json({
-      success: true,
-      message: 'Logged out successfully, token blacklisted',
-    });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error during logout',
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: 'Logout failed', error: error.message });
   }
 };
 
-// Get Current User
+/* =====================================================
+   GET CURRENT USER
+===================================================== */
 exports.getCurrentUser = async (req, res) => {
   try {
-    const userId = req.user.id;
-
-   if(!userId){
-    return res.status(400).json({
-      success:false,
-      message:"userId is Required"
-    })
-   }
-
-
-
-    const user = await User.findById(userId).populate('additionalInfo');
-
+    const user = await User.findById(req.user.id).populate('additionalInfo');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-
-
     res.status(200).json({
       success: true,
       user: {
         id: user._id,
         phone: user.phone,
-        email: user.additionalInfo?.email || '',
         name: user.additionalInfo?.name || '',
-        address: user.additionalInfo?.address || '',
+        email: user.additionalInfo?.email || '',
         role: user.role,
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error fetching user', error: error.message });
+    res.status(500).json({ success: false, message: 'Fetch failed', error: error.message });
   }
 };

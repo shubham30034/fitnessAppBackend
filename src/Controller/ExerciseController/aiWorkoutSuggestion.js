@@ -1,63 +1,64 @@
 const AIWorkoutPlan = require("../../Model/fitnessModel/aiWorkoutPlanner");
 const User = require("../../Model/userModel/userModel");
-const fetch = require("node-fetch");
-const openRouter = require("../../Utils/aiApi")
-const {aiWorkoutPlannerValidation} = require("../../validator/workoutValidation")
+const openRouter = require("../../Utils/aiApi");
+const { aiWorkoutPlannerValidation } = require("../../validator/workoutValidation");
 
+/* =====================================================
+   CREATE / REGENERATE AI WORKOUT PLAN (RAW SAVE)
+===================================================== */
 exports.aiWorkoutPlanner = async (req, res) => {
   try {
     const userId = req.user.id;
     const { goal, fitness_level, total_weeks } = req.body;
 
-
-    const {error} = aiWorkoutPlannerValidation({goal,fitness_level,total_weeks})
+    /* ---------- validation ---------- */
+    const { error } = aiWorkoutPlannerValidation({
+      goal,
+      fitness_level,
+      total_weeks,
+    });
 
     if (error) {
-  return res.status(400).json({ success: false, message: "Validation failed", errors: error.details.map(e => e.message) });
-}
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: error.details.map(e => e.message),
+      });
+    }
 
-
+    /* ---------- user check ---------- */
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
 
     const days_per_week = 5;
     const total_sessions = total_weeks * days_per_week;
 
-    const schedule = {
-      days_per_week,
-      session_duration: 60
-    };
-
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    // Check if workout plan already exists
-    const existingPlan = await AIWorkoutPlan.findOne({ userId });
-    if (existingPlan) {
-      return res.status(400).json({ success: false, message: "Plan already exists" });
-    }
-
-    // Construct improved prompt
+    /* ---------- AI PROMPT ---------- */
     const prompt = `
 You are an expert fitness coach.
 
-Create a workout plan lasting exactly ${total_weeks} weeks for a(n) ${fitness_level} individual with the goal: "${goal}".
+Create a workout plan for a ${fitness_level} person with goal "${goal}".
 
-The plan has 5 workout sessions per week (total ${total_sessions} sessions). Each session is approximately 60 minutes.
+Rules:
+- Duration: ${total_weeks} weeks
+- Workouts per week: ${days_per_week}
+- Total sessions: ${total_sessions}
 
-Number the sessions sequentially from "1" to "${total_sessions}".
+Each session must include:
+- day (string)
+- focus (muscle group)
+- exercises array:
+  - name (string)
+  - sets (number)
+  - reps (string)
+  - notes (string)
 
-Each session should contain:
-- "day": session number as a string (e.g., "1", "2", ...)
-- "focus": main muscle groups targeted (e.g., "Chest and Triceps")
-- "exercises": an array of exercises with each exercise having:
-   - "name": string (exercise name)
-   - "sets": number
-   - "reps": string (e.g., "8-10")
-   - "notes": string (optional instructions)
-
-Return ONLY a valid JSON object matching the structure below with NO explanations, no markdown, no extra text, no code fences, no comments:
+Return ONLY valid JSON:
 
 {
   "sessions": [
@@ -71,89 +72,133 @@ Return ONLY a valid JSON object matching the structure below with NO explanation
   ]
 }
 
-Make sure:
-- The JSON is complete and properly formatted.
-- Strings use double quotes.
-- No trailing commas.
-- No partial or truncated JSON.
+No markdown.
+No explanation.
+Only JSON.
+`;
 
-Your response should be only the JSON object above.
-    `;
+    /* ---------- AI CALL ---------- */
+    const result = await openRouter(prompt);
+    let content = result?.choices?.[0]?.message?.content || "";
 
-    // Call AI API
-  const result = await openRouter(prompt)
-
-    let content = result.choices?.[0]?.message?.content || "";
-
-    // Remove markdown code fences if any
     if (content.startsWith("```")) {
-      content = content.replace(/```(?:json)?/g, "").replace(/```/g, "").trim();
+      content = content.replace(/```(?:json)?/g, "").trim();
     }
 
-    // Parse JSON safely
+    /* ---------- SAFE PARSE ---------- */
     let parsed;
     try {
       parsed = JSON.parse(content);
-    } catch (err) {
-      return res.status(500).json({ success: false, message: "Invalid JSON from AI", error: err.message });
+    } catch {
+      return res.status(500).json({
+        success: false,
+        message: "AI returned invalid JSON",
+      });
     }
 
-    const sessions = parsed.sessions || [];
-
-    // Days of the week in order
-    const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-
-    // Build weeks array from sessions
-    const weeksMap = {};
-
-    sessions.forEach((session) => {
-      const sessionNumber = parseInt(session.day, 10);
-      const weekNum = Math.ceil(sessionNumber / days_per_week);
-      const dayIndex = (sessionNumber - 1) % days_per_week;
-
-      if (!weeksMap[weekNum]) {
-        weeksMap[weekNum] = [];
-      }
-
-      weeksMap[weekNum].push({
-        day: dayNames[dayIndex],
-        exercises: (session.exercises || []).map(ex => ({
-          name: ex.name,
-          sets: ex.sets,
-          reps: ex.reps || "",
-          notes: ex.notes || ""
-        }))
+    if (!parsed || !Array.isArray(parsed.sessions)) {
+      return res.status(500).json({
+        success: false,
+        message: "Invalid AI workout plan structure",
       });
-    });
+    }
 
-    // Convert map to array
-    const weeks = Object.keys(weeksMap).map(weekStr => ({
-      week: parseInt(weekStr, 10),
-      days: weeksMap[weekStr]
-    }));
+    /* ---------- CREATE or REGENERATE ---------- */
+    const existingPlan = await AIWorkoutPlan.findOne({ userId });
 
-    // Save new workout plan
-    const newPlan = new AIWorkoutPlan({
+    if (existingPlan) {
+      existingPlan.goal = goal;
+      existingPlan.fitness_level = fitness_level;
+      existingPlan.total_weeks = total_weeks;
+      existingPlan.plan = parsed;
+      existingPlan.createdAt = new Date();
+
+      await existingPlan.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Workout plan regenerated successfully",
+        data: existingPlan,
+      });
+    }
+
+    const newPlan = await AIWorkoutPlan.create({
       userId,
       goal,
       fitness_level,
       total_weeks,
-      schedule,
-      weeks
+      plan: parsed,
     });
 
-    await newPlan.save();
-
-    res.status(201).json({ success: true, message: "Workout plan created", data: newPlan });
+    return res.status(201).json({
+      success: true,
+      message: "Workout plan created successfully",
+      data: newPlan,
+    });
 
   } catch (error) {
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
+/* =====================================================
+   GET CURRENT WORKOUT PLAN
+===================================================== */
+exports.getWorkoutPlan = async (req, res) => {
+  try {
+    const userId = req.user.id;
 
+    const plan = await AIWorkoutPlan.findOne({ userId });
 
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        message: "No workout plan found",
+      });
+    }
 
+    return res.status(200).json({
+      success: true,
+      data: plan,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch workout plan",
+      error: error.message,
+    });
+  }
+};
 
+/* =====================================================
+   DELETE WORKOUT PLAN
+===================================================== */
+exports.deleteWorkoutPlan = async (req, res) => {
+  try {
+    const userId = req.user.id;
 
+    const deleted = await AIWorkoutPlan.findOneAndDelete({ userId });
 
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "No workout plan to delete",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Workout plan deleted successfully",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete workout plan",
+      error: error.message,
+    });
+  }
+};

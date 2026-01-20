@@ -1,80 +1,66 @@
 const express = require("express");
-const route = express.Router();
+const router = express.Router();
 
 const {
   loginWithPassword,
-  signupWithPassword,
   loginOfficial,
-  logout,
-  getCurrentUser,
-  regenerateRefreshToken,
+  signupWithPassword,
   getMe,
-  // Coach-specific operations
-  getCoachProfile,
-  updateCoachProfile,
-  getCoachDashboard,
-  getCoachAnalytics,
-  getCoachClients,
-  // Coach chat functionality
-  getCoachChatRooms,
-  getChatMessages,
-  sendMessage,
-  createChatRoom
+  logout,
+  regenerateRefreshToken,
+  changePassword,
 } = require("../../Controller/CoachSellerController/auth");
 
-const {
-  authentication,
-  isCoach,
-  isSeller,
-} = require("../../Middleware/userAuth");
+const { enforceTempPwToken } = require("../../Middleware/enforceTempPwToken");
+const { authentication } = require("../../Middleware/userAuth");
 
-// ✅ Login with phone and password (for Coach or Seller)
-route.post("/login", loginWithPassword);
+/* ========================= AUTH ROUTES ========================= */
 
-// ✅ Signup for coach or seller (consider restricting in production)
-route.post("/signup", signupWithPassword);
+/**
+ * Staff login
+ * Roles allowed:
+ * - coach
+ * - seller
+ * - coachmanager
+ */
+router.post("/login", loginWithPassword);
 
-// ✅ Admin/Superadmin login
-route.post("/official-login", loginOfficial);
+/**
+ * Admin / Superadmin login
+ */
+router.post("/official-login", loginOfficial);
 
-// ✅ Get current authenticated user details (for Coach or Seller)
-route.get("/me", authentication, getMe);
+/**
+ * Bootstrap signup
+ * ⚠️ Auto-disabled in production via controller
+ */
+router.post("/signup", signupWithPassword);
 
-// ✅ Logout the current session
-route.post("/logout", authentication, logout);
+/**
+ * Refresh access token
+ * (refresh token doesn't need auth middleware)
+ */
+router.post("/refresh-token", regenerateRefreshToken);
 
-// ✅ Regenerate a new refresh token
-route.post("/refresh-token", regenerateRefreshToken);
+/**
+ * ✅ Change password
+ * IMPORTANT:
+ * - Must work with TEMP token (pw:true)
+ * - So authentication + enforceTempPwToken needed
+ */
+router.post("/change-password", authentication, enforceTempPwToken, changePassword);
 
-// ===================== COACH-SPECIFIC ROUTES =====================
+/**
+ * Get current logged-in user
+ * TEMP TOKEN should NOT allow access here
+ */
+router.get("/me", authentication, enforceTempPwToken, getMe);
 
-// ✅ Get coach profile (for coach users)
-route.get("/coach/profile", authentication, isCoach, getCoachProfile);
+/**
+ * Logout (access + refresh token)
+ * TEMP TOKEN can logout ✅ allowed
+ */
+router.post("/logout", authentication, logout);
 
-// ✅ Update coach profile (for coach users)
-route.put("/coach/profile", authentication, isCoach, updateCoachProfile);
 
-// ✅ Get coach dashboard (for coach users)
-route.get("/coach/dashboard", authentication, isCoach, getCoachDashboard);
-
-// ✅ Get coach analytics (for coach users)
-route.get("/coach/analytics", authentication, isCoach, getCoachAnalytics);
-
-// ✅ Get coach clients (for coach users)
-route.get("/coach/clients", authentication, isCoach, getCoachClients);
-
-// ===================== COACH CHAT ROUTES =====================
-
-// ✅ Get coach chat rooms (for coach users)
-route.get("/coach/chat-rooms", authentication, isCoach, getCoachChatRooms);
-
-// ✅ Get chat messages for a specific room (for coach users)
-route.get("/coach/chat-rooms/:roomId/messages", authentication, isCoach, getChatMessages);
-
-// ✅ Send message in chat room (for coach users)
-route.post("/coach/chat-rooms/:roomId/messages", authentication, isCoach, sendMessage);
-
-// ✅ Create chat room with a client (for coach users)
-route.post("/coach/chat-rooms", authentication, isCoach, createChatRoom);
-
-module.exports = route;
+module.exports = router;

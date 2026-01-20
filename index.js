@@ -66,7 +66,7 @@ app.get('/health', (req, res) => {
 // Import routes
 const userRoutes = require("./src/Routes/UserRoutes/userRoutes");
 const productRoutes = require("./src/Routes/ProductRoutes/productRoutes");
-const superAdminRoutes = require("./src/Routes/SuperAdminRoutes/superAdminRoutes");
+const superAdminRoutes = require("./src/Routes/adminRoutes/superAdminRoutes");
 const coachSellerRoutes = require("./src/Routes/CoachSellerRoute/coachSeller");
 const exerciseRoutes = require("./src/Routes/ExerciseRoutes/exercise");
 const userExerciseRoutes = require("./src/Routes/ExerciseRoutes/userExercise");

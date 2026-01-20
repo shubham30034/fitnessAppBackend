@@ -1,7 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
-// Controller functions
+/* ===============================
+   CONTROLLERS
+================================ */
 const {
   sendOtp,
   verifyOtp,
@@ -10,47 +12,55 @@ const {
   getCurrentUser,
 } = require("../../Controller/UserController/authUser");
 
-
-// additional info controller
 const {
   createAdditionalInfo,
   getAdditionalInfo,
   updateAdditionalInfo,
   uploadProfilePicture,
   deleteAdditionalInfo,
-  getProfilePictureUrls
+  getProfilePictureUrls,
 } = require("../../Controller/UserController/additionalInfo");
 
-
-
-
-
-
-
-// Middleware
+/* ===============================
+   MIDDLEWARE
+================================ */
 const { authentication, isUser } = require("../../Middleware/userAuth");
-const { uploadSingleImage, handleUploadError } = require("../../Middleware/uploadProfileUser")
+const {
+  uploadSingleImage,
+  handleUploadError,
+} = require("../../Middleware/uploadProfileUser");
 
-// Public routes
+/* ===============================
+   PUBLIC ROUTES
+================================ */
 router.post("/send-otp", sendOtp);
 router.post("/verify-otp", verifyOtp);
 router.post("/refresh-token", regenerateRefreshToken);
 
+/* ===============================
+   USER ROUTES
+================================ */
+router.post("/additional-info", authentication, isUser, createAdditionalInfo);
+router.get("/additional-info", authentication, isUser, getAdditionalInfo);
+router.put("/additional-info", authentication, isUser, updateAdditionalInfo);
+router.delete("/additional-info", authentication, isUser, deleteAdditionalInfo);
 
-// Protected routes for additional info
+router.post(
+  "/additional-info/profile",
+  authentication,
+  isUser,
+  uploadSingleImage,
+  uploadProfilePicture,
+  handleUploadError
+);
 
-router.post("/additional-info", authentication,createAdditionalInfo)
-router.get("/additional-info", authentication,getAdditionalInfo)
-router.put("/additional-info", authentication, updateAdditionalInfo)
-router.delete("/additional-info", authentication, deleteAdditionalInfo)
-router.post("/additional-info/profile", authentication, uploadSingleImage, uploadProfilePicture);
-router.get("/additional-info/profile", authentication, getProfilePictureUrls);
-router.use(handleUploadError); // Add error handling middleware
+router.get(
+  "/additional-info/profile",
+  authentication,
+  isUser,
+  getProfilePictureUrls
+);
 
-
-
-
-// Protected routes
 router.post("/logout", authentication, isUser, logout);
 router.get("/me", authentication, isUser, getCurrentUser);
 
