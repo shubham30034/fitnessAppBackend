@@ -190,34 +190,56 @@ exports.regenerateRefreshToken = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    const accessToken = req.headers.authorization?.split(' ')[1];
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const accessToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.split(" ")[1]
+      : null;
 
     if (!refreshToken || !accessToken) {
-      return res.status(400).json({ success: false, message: 'Tokens required' });
+      return res.status(400).json({ success: false, message: "Tokens required" });
     }
 
-    let decoded;
+    // 1) Try verify access token (for exp + userId)
+    let decoded = null;
     try {
       decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
-    } catch {
-      decoded = null;
+    } catch (e) {
+      // If expired/invalid, we still want to revoke refresh token (best effort)
+      decoded = jwt.decode(accessToken); // might still give id/exp
     }
 
-    await RefreshToken.deleteMany({ userId: decoded?.id });
+    // 2) Kill refresh tokens (single session policy)
+    // Only if we have userId
+    if (decoded?.id) {
+      await RefreshToken.deleteMany({ userId: decoded.id });
+    }
 
+    // 3) Blacklist access token (raw, because middleware checks raw)
+    // Avoid duplicates
     if (decoded?.exp) {
-      await BlacklistedToken.create({
-        token: accessToken,
-        expiresAt: new Date(decoded.exp * 1000),
-      });
+      await BlacklistedToken.findOneAndUpdate(
+        { token: accessToken },
+        {
+          $setOnInsert: {
+            token: accessToken,
+            expiresAt: new Date(decoded.exp * 1000),
+          },
+        },
+        { upsert: true }
+      );
     }
 
-    res.status(200).json({ success: true, message: 'Logged out successfully' });
-
+    return res
+      .status(200)
+      .json({ success: true, message: "Logged out successfully" });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Logout failed', error: error.message });
+    console.error("logout error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Logout failed" });
   }
 };
+
 
 /* =====================================================
    GET CURRENT USER

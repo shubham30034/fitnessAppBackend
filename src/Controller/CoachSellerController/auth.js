@@ -1,7 +1,6 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const mongoose = require("mongoose");
 
 const User = require("../../Model/userModel/userModel");
 const UserAdditionalInfo = require("../../Model/userModel/additionalInfo");
@@ -94,10 +93,8 @@ const generateTempPwAccessToken = (user) => {
   });
 };
 
-// Verify refresh token with correct secret
+// ✅ Verify refresh token with correct secret
 const verifyRefreshToken = (token) => {
-  // You MUST store refresh secret in env:
-  // REFRESH_TOKEN_SECRET=...
   return jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
 };
 
@@ -117,11 +114,9 @@ exports.loginWithPassword = async (req, res) => {
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return invalidAuth(res);
 
-    // IMPORTANT: include password
+    // ✅ IMPORTANT: include password select
     const user = await User.findOne({ phone: normalizedPhone })
       .populate("additionalInfo");
-
-      
 
     if (
       !user ||
@@ -188,7 +183,6 @@ exports.loginOfficial = async (req, res) => {
     if (!normalizedPhone) return invalidAuth(res);
 
     const user = await User.findOne({ phone: normalizedPhone })
-      .select("+password mustChangePassword isActive role phone additionalInfo")
       .populate("additionalInfo");
 
     if (
@@ -348,44 +342,55 @@ exports.getMe = async (req, res) => {
 /* ========================= LOGOUT ========================= */
 exports.logout = async (req, res) => {
   try {
-    const accessToken = getBearerToken(req);
     const { refreshToken } = req.body;
 
-    if (!accessToken || !refreshToken) {
-      return badRequest(res, "Tokens required");
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const accessToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.split(" ")[1]
+      : null;
+
+    if (!refreshToken || !accessToken) {
+      return res.status(400).json({ success: false, message: "Tokens required" });
     }
 
-    // decode access token to find userId & expiry
-    let decodedAccess;
+    // ✅ verify ACCESS token with JWT_SECRET (not refresh secret)
+    let decoded = null;
     try {
-      decodedAccess = jwt.verify(accessToken, process.env.JWT_SECRET);
-    } catch {
-      // token invalid/expired => still delete refresh token if possible
-      // but we need userId, so best effort: decode
-      decodedAccess = jwt.decode(accessToken);
+      decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
+    } catch (e) {
+      decoded = jwt.decode(accessToken); // best-effort decode
     }
 
-    if (decodedAccess?.id) {
-      await RefreshToken.deleteOne({
-        userId: decodedAccess.id,
-        token: hashToken(refreshToken),
-      });
+    // kill refresh tokens if we have userId
+    if (decoded?.id) {
+      await RefreshToken.deleteMany({ userId: decoded.id });
     }
 
-    // blacklist access token (store hashed)
-    if (decodedAccess?.exp) {
-      await BlacklistedToken.create({
-        token: hashToken(accessToken),
-        userId: decodedAccess?.id || null,
-        expiresAt: new Date(decodedAccess.exp * 1000),
-        reason: "LOGOUT",
-      });
+    // blacklist raw access token (because middleware checks raw)
+    if (decoded?.exp) {
+      await BlacklistedToken.findOneAndUpdate(
+        { token: accessToken },
+        {
+          $setOnInsert: {
+            token: accessToken,
+            expiresAt: new Date(decoded.exp * 1000),
+            reason: "LOGOUT",
+            userId: decoded?.id || null,
+          },
+        },
+        { upsert: true }
+      );
     }
 
-    return res.json({ success: true, message: "Logged out" });
-  } catch (err) {
-    console.error("logout error:", err);
-    return res.status(500).json({ success: false, message: "Logout failed" });
+    return res.status(200).json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    console.error("logout error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Logout failed" });
   }
 };
 
@@ -393,43 +398,45 @@ exports.logout = async (req, res) => {
 exports.regenerateRefreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-
     if (!refreshToken) return badRequest(res, "Refresh token required");
 
     let decoded;
     try {
       decoded = verifyRefreshToken(refreshToken);
-    } catch {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid refresh token",
-      });
+    } catch (e) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid refresh token" });
     }
 
     const hashed = hashToken(refreshToken);
 
-    // ensure refresh token exists in DB
-    const exists = await RefreshToken.findOne({
+    // ✅ atomic delete = replay proof
+    const exists = await RefreshToken.findOneAndDelete({
       userId: decoded.id,
       token: hashed,
     });
 
     if (!exists) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid refresh token",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid refresh token" });
     }
 
-    // rotate refresh token
-    await RefreshToken.deleteOne({ userId: decoded.id, token: hashed });
+    // fetch role from DB (don’t trust token claims fully)
+    const user = await User.findById(decoded.id).select("role isActive");
+    if (!user || !user.isActive) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid refresh token" });
+    }
 
-    const payload = { id: decoded.id, role: decoded.role };
+    const payload = { id: user._id, role: user.role };
     const { accessToken, refreshToken: newRefreshToken } =
       await generateToken(payload);
 
     await RefreshToken.create({
-      userId: decoded.id,
+      userId: user._id,
       token: hashToken(newRefreshToken),
     });
 
@@ -453,11 +460,10 @@ exports.regenerateRefreshToken = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const accessToken = getBearerToken(req);
-    const isTempFlow = req.user?.pw === true; // ✅ comes from temp token payload
+    const isTempFlow = req.user?.pw === true;
 
     const { oldPassword, newPassword } = req.body;
 
-    // temp flow -> old password not required
     if (!newPassword) {
       return badRequest(res, "newPassword required");
     }
@@ -484,7 +490,6 @@ exports.changePassword = async (req, res) => {
       return forbidden(res);
     }
 
-    // Normal flow: verify oldPassword
     if (!isTempFlow) {
       if (!oldPassword) return badRequest(res, "oldPassword required");
 
@@ -501,7 +506,6 @@ exports.changePassword = async (req, res) => {
       }
     }
 
-    // Update password
     user.password = await bcrypt.hash(newPassword, 12);
     user.mustChangePassword = false;
     await user.save();
@@ -509,23 +513,28 @@ exports.changePassword = async (req, res) => {
     // logout everywhere
     await RefreshToken.deleteMany({ userId: user._id });
 
-    // blacklist current access token (recommended)
+    // ✅ blacklist RAW current access token (because middleware checks raw)
     if (accessToken) {
       try {
-        const decoded = jwt.decode(accessToken);
-        if (decoded?.exp) {
-          await BlacklistedToken.create({
-            token: hashToken(accessToken),
-            userId: user._id,
-            expiresAt: new Date(decoded.exp * 1000),
-            reason: isTempFlow ? "TEMP_PW_CHANGE" : "PASSWORD_CHANGE",
-          });
+        const d = jwt.decode(accessToken);
+        if (d?.exp) {
+          await BlacklistedToken.findOneAndUpdate(
+            { token: accessToken },
+            {
+              $setOnInsert: {
+                token: accessToken,
+                userId: user._id,
+                expiresAt: new Date(d.exp * 1000),
+                reason: isTempFlow ? "TEMP_PW_CHANGE" : "PASSWORD_CHANGE",
+              },
+            },
+            { upsert: true }
+          );
         }
       } catch (_) {}
     }
 
-    // ✅ BEST UX:
-    // Temp flow => issue fresh tokens immediately (so user can continue)
+    // Temp flow => issue fresh tokens immediately
     if (isTempFlow) {
       const payload = { id: user._id, role: user.role };
       const { accessToken: newAccess, refreshToken: newRefresh } =
@@ -546,7 +555,6 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Normal flow: force re-login (safer)
     return res.json({
       success: true,
       message: "Password changed successfully. Please login again.",

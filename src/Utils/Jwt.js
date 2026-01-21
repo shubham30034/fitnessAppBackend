@@ -9,7 +9,7 @@ exports.generateToken = async(payload) => {
       audience: 'fitness-app-users',
     });
   
-    const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN, {
+    const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
       expiresIn: '30d',
       issuer: 'fitness-app',
       audience: 'fitness-app-users',
