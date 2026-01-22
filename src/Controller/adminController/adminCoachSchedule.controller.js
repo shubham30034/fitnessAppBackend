@@ -1,5 +1,0 @@
-// createCoachSchedule
-
-// editCoachSchedule
-
-// getAllCoachSchedules

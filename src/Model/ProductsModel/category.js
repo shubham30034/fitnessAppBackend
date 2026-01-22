@@ -1,69 +1,59 @@
 // models/Category.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const categorySchema = new mongoose.Schema(
-{
+  {
     name: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true,
-        enum: [
-            'supplement',
-            'clothes', 
-            'accessories',
-            'equipment',
-            'nutrition',
-            'wellness',
-            'technology',
-            'books',
-            'apparel',
-            'footwear'
-        ]
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      enum: [
+        "supplement",
+        "clothes",
+        "accessories",
+        "equipment",
+        "nutrition",
+        "wellness",
+        "technology",
+        "books",
+        "apparel",
+        "footwear",
+      ],
     },
 
-    description: {
-        type: String,
-        maxlength: 500
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      index: true,
     },
 
-    image: {
-        type: String
-    },
+    description: { type: String, trim: true, maxlength: 500 },
+    image: { type: String, trim: true },
 
-    isActive: {
-        type: Boolean,
-        default: true
-    },
-
-    sortOrder: {
-        type: Number,
-        default: 0
-    },
-
-    subcategories: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'SubCategory'
-    }],
-
-    products: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Product'
-    }]
-},
-{ timestamps: true }
+    isActive: { type: Boolean, default: true, index: true },
+    sortOrder: { type: Number, default: 0, index: true },
+  },
+  { timestamps: true }
 );
 
-// ✅ ONLY non-duplicate indexes
-categorySchema.index({ isActive: 1 });
-categorySchema.index({ sortOrder: 1 });
+// Unique + fast search
+categorySchema.index({ name: 1 }, { unique: true });
+categorySchema.index({ isActive: 1, sortOrder: 1 });
 
-// Virtual for product count
-categorySchema.virtual('productCount').get(function () {
-    return this.products ? this.products.length : 0;
+// slug generation
+categorySchema.pre("validate", function (next) {
+  if (!this.slug && this.name) {
+    this.slug = this.name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+  }
+  next();
 });
 
-categorySchema.set('toJSON', { virtuals: true });
-categorySchema.set('toObject', { virtuals: true });
-
-module.exports = mongoose.model('Category', categorySchema);
+module.exports = mongoose.model("Category", categorySchema);
