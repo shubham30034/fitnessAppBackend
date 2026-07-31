@@ -14,34 +14,63 @@ const {
 } = require("../../Controller/ProductsController/cart/cart.controller");
 
 /* =========================================================
-   ✅ CART ROUTES (User only)
+   ✅ USER AUTHENTICATION
 ========================================================= */
 
-// protect all cart routes
 router.use(authentication, isUser);
 
-// Add item to cart
-// POST /api/v1/cart
+/* =========================================================
+   ✅ ADD TO CART
+========================================================= */
+
+/**
+ * POST /api/v1/cart
+ */
 router.post("/", asyncHandler(addToCart));
 
-// Get cart
-// GET /api/v1/cart
+/* =========================================================
+   ✅ GET CART
+========================================================= */
+
+/**
+ * GET /api/v1/cart
+ */
 router.get("/", asyncHandler(getCart));
 
-// Update cart item quantity
-// PATCH /api/v1/cart/:productId
+/* =========================================================
+   ✅ GET CART TOTAL
+========================================================= */
+
+/**
+ * GET /api/v1/cart/total
+ */
+router.get("/total", asyncHandler(getCartTotal));
+
+/* =========================================================
+   ✅ UPDATE CART ITEM QUANTITY
+========================================================= */
+
+/**
+ * PATCH /api/v1/cart/:productId
+ */
 router.patch("/:productId", asyncHandler(updateCartItemQuantity));
 
-// Remove item from cart
-// DELETE /api/v1/cart/:productId
+/* =========================================================
+   ✅ REMOVE SINGLE CART ITEM
+========================================================= */
+
+/**
+ * DELETE /api/v1/cart/:productId
+ */
 router.delete("/:productId", asyncHandler(removeFromCart));
 
-// Clear cart
-// DELETE /api/v1/cart
-router.delete("/", asyncHandler(clearCart));
+/* =========================================================
+   ✅ CLEAR CART
+========================================================= */
 
-// Get cart total
-// GET /api/v1/cart/total
-router.get("/total", asyncHandler(getCartTotal));
+/**
+ * DELETE /api/v1/cart
+ */
+router.delete("/", asyncHandler(clearCart));
 
 module.exports = router;

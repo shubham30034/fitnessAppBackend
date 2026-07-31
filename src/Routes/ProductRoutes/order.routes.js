@@ -2,44 +2,112 @@ const express = require("express");
 const router = express.Router();
 
 const asyncHandler = require("../../Utils/aysncHandler");
+
 const { authentication, isUser } = require("../../Middleware/userAuth");
 
 const {
   buyNow,
   checkoutFromCart,
+  verifyRazorpayPayment,
   getMyOrders,
   getInvoice,
+  cancelOrder,
 } = require("../../Controller/ProductsController/order/order.controller");
 
+const {
+  verifyRazorpayWebhook,
+} = require("../../Controller/ProductsController/order/webhook.controller");
+
 /* =========================================================
-   ✅ USER ORDER ROUTES
+   ✅ PUBLIC ROUTE (RAZORPAY WEBHOOK)
 ========================================================= */
-router.use(authentication, isUser);
 
 /**
- * ✅ Buy Now (single product checkout)
+ * POST /api/v1/orders/webhook/razorpay
+ */
+router.post(
+  "/webhook/razorpay",
+  asyncHandler(verifyRazorpayWebhook)
+);
+
+/* =========================================================
+   ✅ USER AUTHENTICATION
+========================================================= */
+
+router.use(authentication, isUser);
+
+/* =========================================================
+   ✅ BUY NOW
+========================================================= */
+
+/**
  * POST /api/v1/orders/buy-now
  * body: { productId, quantity, address }
  */
-router.post("/buy-now", asyncHandler(buyNow));
+router.post(
+  "/buy-now",
+  asyncHandler(buyNow)
+);
+
+/* =========================================================
+   ✅ CART CHECKOUT
+========================================================= */
 
 /**
- * ✅ Checkout from cart
  * POST /api/v1/orders/checkout
  * body: { address }
  */
-router.post("/checkout", asyncHandler(checkoutFromCart));
+router.post(
+  "/checkout",
+  asyncHandler(checkoutFromCart)
+);
+
+/* =========================================================
+   ✅ VERIFY PAYMENT
+========================================================= */
 
 /**
- * ✅ Get my orders
+ * POST /api/v1/orders/verify-payment
+ */
+router.post(
+  "/verify-payment",
+  asyncHandler(verifyRazorpayPayment)
+);
+
+/* =========================================================
+   ✅ MY ORDERS
+========================================================= */
+
+/**
  * GET /api/v1/orders/my
  */
-router.get("/my", asyncHandler(getMyOrders));
+router.get(
+  "/my",
+  asyncHandler(getMyOrders)
+);
+
+/* =========================================================
+   ✅ INVOICE
+========================================================= */
 
 /**
- * ✅ Invoice for a specific order
  * GET /api/v1/orders/invoice/:orderId
  */
-router.get("/invoice/:orderId", asyncHandler(getInvoice));
+router.get(
+  "/invoice/:orderId",
+  asyncHandler(getInvoice)
+);
+
+/* =========================================================
+   ✅ CANCEL ORDER
+========================================================= */
+
+/**
+ * PATCH /api/v1/orders/cancel/:orderId
+ */
+router.patch(
+  "/cancel/:orderId",
+  asyncHandler(cancelOrder)
+);
 
 module.exports = router;

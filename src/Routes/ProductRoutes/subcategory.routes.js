@@ -2,7 +2,11 @@ const express = require("express");
 const router = express.Router();
 
 const asyncHandler = require("../../Utils/aysncHandler");
-const { authentication, isSuperAdmin } = require("../../Middleware/userAuth");
+
+const {
+  authentication,
+  isSuperAdmin,
+} = require("../../Middleware/userAuth");
 
 const {
   createSubCategory,
@@ -12,23 +16,50 @@ const {
 } = require("../../Controller/ProductsController/catalog/subcategory.controller");
 
 /* =========================================================
-   ✅ PUBLIC
+   ✅ PUBLIC ROUTES
 ========================================================= */
 
-// GET /api/v1/subcategories
+/**
+ * GET /api/v1/subcategories
+ * Get all active subcategories
+ */
 router.get("/", asyncHandler(getAllSubCategories));
 
 /* =========================================================
-   ✅ SUPERADMIN ONLY
+   ✅ SUPER ADMIN ROUTES
 ========================================================= */
 
-// POST /api/v1/subcategories
-router.post("/", authentication, isSuperAdmin, asyncHandler(createSubCategory));
+/**
+ * POST /api/v1/subcategories
+ * Create subcategory
+ */
+router.post(
+  "/",
+  authentication,
+  isSuperAdmin,
+  asyncHandler(createSubCategory)
+);
 
-// PATCH /api/v1/subcategories/:id
-router.patch("/:id", authentication, isSuperAdmin, asyncHandler(updateSubCategory));
+/**
+ * PATCH /api/v1/subcategories/:id
+ * Update subcategory
+ */
+router.patch(
+  "/:id",
+  authentication,
+  isSuperAdmin,
+  asyncHandler(updateSubCategory)
+);
 
-// DELETE /api/v1/subcategories/:id (soft delete)
-router.delete("/:id", authentication, isSuperAdmin, asyncHandler(deleteSubCategory));
+/**
+ * DELETE /api/v1/subcategories/:id
+ * Soft delete subcategory
+ */
+router.delete(
+  "/:id",
+  authentication,
+  isSuperAdmin,
+  asyncHandler(deleteSubCategory)
+);
 
 module.exports = router;

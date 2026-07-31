@@ -115,7 +115,10 @@ const productRoutes = require("./src/Routes/ProductRoutes/product.routes");
 const cartRoutes = require("./src/Routes/ProductRoutes/cart.routes");
 const orderRoutes = require("./src/Routes/ProductRoutes/order.routes");
 const webhookRoutes = require("./src/Routes/ProductRoutes/webhook.routes");
-const adminRoutes = require("./src/Routes/ProductRoutes/admin.routes");
+
+const sellerRoute = require("./src/Routes/sellerRoutes/seller.routes")
+const adminProductRoutes = require("./src/Routes/adminRoutes/superAdmin.product.routes")
+
 
 
 /* =========================================================
@@ -144,11 +147,17 @@ app.use("/api/v1/products", productRoutes);
 app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/orders", orderRoutes);
 
+// ✅ Seller routes
+app.use("/api/v1/seller", sellerRoute);
+
+// ✅ Admin product management routes
+// app.use("/api/v1/admin/products", adminProductRoutes);
+
 // ✅ Webhooks (signature verify uses req.rawBody)
 app.use("/api/v1/webhooks", webhookRoutes);
 
 // ✅ Admin product/order management
-app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/admin/products", adminProductRoutes);
 
 /* =========================================================
    ✅ DB Connection

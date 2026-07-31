@@ -8,12 +8,20 @@ const {
 } = require("../../Controller/ProductsController/order/webhook.controller");
 
 /* =========================================================
-   ✅ Razorpay Webhook
-   - NO auth
-   - rawBody already set in app.js
+   ✅ RAZORPAY WEBHOOK (PUBLIC)
 ========================================================= */
 
-// POST /api/v1/webhooks/razorpay
-router.post("/razorpay", asyncHandler(verifyRazorpayWebhook));
+/**
+ * POST /api/v1/webhooks/razorpay
+ *
+ * NOTE:
+ * - No Authentication
+ * - Razorpay calls this endpoint directly
+ * - rawBody should be configured in app.js
+ */
+router.post(
+  "/razorpay",
+  asyncHandler(verifyRazorpayWebhook)
+);
 
 module.exports = router;

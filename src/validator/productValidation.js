@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 ========================= */
 const objectId = (value, helpers) => {
   if (!mongoose.Types.ObjectId.isValid(value)) {
-    return helpers.error("any.invalid");
+    return helpers.message("Invalid ObjectId");
   }
   return value;
 };
@@ -19,6 +19,7 @@ const keywordsSchema = Joi.array()
     "string.empty": "keyword cannot be empty",
     "string.min": "keyword cannot be empty",
   });
+
 
 /* =========================
    Create Product Validation
@@ -46,15 +47,15 @@ exports.validateCreateProduct = (data) => {
       "string.max": "brand must be at most 80 characters",
     }),
 
-    price: Joi.number().positive().required().messages({
+    price: Joi.number().min(0).required().messages({
       "number.base": "price must be a number",
-      "number.positive": "price must be greater than 0",
+      "number.min": "price cannot be negative",
       "any.required": "price is required",
     }),
 
-    originalPrice: Joi.number().positive().optional().messages({
+    originalPrice: Joi.number().min(0).optional().messages({
       "number.base": "originalPrice must be a number",
-      "number.positive": "originalPrice must be greater than 0",
+      "number.min": "originalPrice cannot be negative",
     }),
 
     quantity: Joi.number().integer().min(0).optional().messages({
@@ -69,13 +70,9 @@ exports.validateCreateProduct = (data) => {
       "number.min": "lowStockThreshold must be >= 0",
     }),
 
-    category: Joi.string()
-      .required()
-      .custom(objectId, "ObjectId validation")
-      .messages({
-        "any.required": "category is required",
-        "any.invalid": "Invalid category",
-      }),
+    category: Joi.string().required().custom(objectId).messages({
+      "any.required": "category is required",
+    }),
 
     subcategory: Joi.string()
       .optional()
@@ -83,92 +80,6 @@ exports.validateCreateProduct = (data) => {
       .custom((value, helpers) => {
         if (value === null || value === "") return value;
         return objectId(value, helpers);
-      }, "ObjectId validation")
-      .messages({
-        "any.invalid": "Invalid subcategory",
-      }),
-
-    metaTitle: Joi.string().trim().max(70).optional().allow("").messages({
-      "string.base": "metaTitle must be a string",
-      "string.max": "metaTitle must be at most 70 characters",
-    }),
-
-    metaDescription: Joi.string().trim().max(200).optional().allow("").messages({
-      "string.base": "metaDescription must be a string",
-      "string.max": "metaDescription must be at most 200 characters",
-    }),
-
-    keywords: keywordsSchema.optional(),
-
-    isActive: Joi.boolean().optional().messages({
-      "boolean.base": "isActive must be a boolean",
-    }),
-
-    isFeatured: Joi.boolean().optional().messages({
-      "boolean.base": "isFeatured must be a boolean",
-    }),
-
-    variants: Joi.array().optional().messages({
-      "array.base": "variants must be an array",
-    }),
-  })
-    // ✅ Rule: originalPrice must be >= price (if provided)
-    .custom((obj, helpers) => {
-      if (obj.originalPrice !== undefined && obj.price !== undefined) {
-        if (Number(obj.originalPrice) < Number(obj.price)) {
-          return helpers.error("any.invalid", {
-            message: "originalPrice must be greater than or equal to price",
-          });
-        }
-      }
-      return obj;
-    })
-    // ✅ unknown fields allowed (so controller doesn't break)
-    .unknown(true);
-
-  return schema.validate(data, { abortEarly: true });
-};
-
-/* =========================
-   Update Product Validation
-   (all optional fields)
-========================= */
-exports.validateUpdateProduct = (data) => {
-  const schema = Joi.object({
-    // ✅ now meaningful if you pass { productId }
-    productId: Joi.string()
-      .optional()
-      .custom(objectId, "ObjectId validation")
-      .messages({
-        "any.invalid": "Invalid productId",
-      }),
-
-    name: Joi.string().trim().min(2).max(120).optional(),
-    description: Joi.string().trim().min(5).max(5000).optional(),
-    brand: Joi.string().trim().max(80).optional().allow(""),
-
-    price: Joi.number().positive().optional(),
-    originalPrice: Joi.number().positive().optional(),
-
-    quantity: Joi.number().integer().min(0).optional(),
-    lowStockThreshold: Joi.number().integer().min(0).optional(),
-
-    category: Joi.string()
-      .optional()
-      .custom(objectId, "ObjectId validation")
-      .messages({
-        "any.invalid": "Invalid category",
-      }),
-
-    subcategory: Joi.string()
-      .optional()
-      .allow(null, "")
-      .custom((value, helpers) => {
-        if (value === null || value === "") return value;
-        return objectId(value, helpers);
-      }, "ObjectId validation")
-      .messages({
-        "any.invalid": "Invalid subcategory",
       }),
 
     metaTitle: Joi.string().trim().max(70).optional().allow(""),
@@ -181,13 +92,61 @@ exports.validateUpdateProduct = (data) => {
 
     variants: Joi.array().optional(),
   })
-    // ✅ update rule too: originalPrice >= price (if both exist)
+    // ✅ Business rule
     .custom((obj, helpers) => {
       if (obj.originalPrice !== undefined && obj.price !== undefined) {
-        if (Number(obj.originalPrice) < Number(obj.price)) {
-          return helpers.error("any.invalid", {
-            message: "originalPrice must be greater than or equal to price",
-          });
+        if (Number(obj.originalPrice) <= Number(obj.price)) {
+          return helpers.message("originalPrice must be greater than price");
+        }
+      }
+      return obj;
+    })
+    .unknown(true);
+
+  return schema.validate(data, { abortEarly: true });
+};
+
+
+/* =========================
+   Update Product Validation
+========================= */
+exports.validateUpdateProduct = (data) => {
+  const schema = Joi.object({
+    productId: Joi.string().optional().custom(objectId),
+
+    name: Joi.string().trim().min(2).max(120).optional(),
+    description: Joi.string().trim().min(5).max(5000).optional(),
+    brand: Joi.string().trim().max(80).optional().allow(""),
+
+    price: Joi.number().min(0).optional(),
+    originalPrice: Joi.number().min(0).optional(),
+
+    quantity: Joi.number().integer().min(0).optional(),
+    lowStockThreshold: Joi.number().integer().min(0).optional(),
+
+    category: Joi.string().optional().custom(objectId),
+
+    subcategory: Joi.string()
+      .optional()
+      .allow(null, "")
+      .custom((value, helpers) => {
+        if (value === null || value === "") return value;
+        return objectId(value, helpers);
+      }),
+
+    metaTitle: Joi.string().trim().max(70).optional().allow(""),
+    metaDescription: Joi.string().trim().max(200).optional().allow(""),
+
+    keywords: keywordsSchema.optional(),
+    isActive: Joi.boolean().optional(),
+    isFeatured: Joi.boolean().optional(),
+
+    variants: Joi.array().optional(),
+  })
+    .custom((obj, helpers) => {
+      if (obj.originalPrice !== undefined && obj.price !== undefined) {
+        if (Number(obj.originalPrice) <= Number(obj.price)) {
+          return helpers.message("originalPrice must be greater than price");
         }
       }
       return obj;

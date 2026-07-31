@@ -4,12 +4,18 @@ const asyncHandler = require("../../../Utils/aysncHandler");
 const ApiError = require("../../../Utils/ApiError");
 const mongoose = require("mongoose");
 
+/* ======================================================
+   ADD TO CART
+====================================================== */
 exports.addToCart = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-  const { productId, quantity = 1 } = req.body;
+  let { productId, quantity = 1 } = req.body;
 
-  if (!mongoose.Types.ObjectId.isValid(productId)) throw new ApiError(400, "Invalid productId");
-  if (typeof quantity !== "number" || quantity <= 0) throw new ApiError(400, "Invalid quantity");
+  if (!mongoose.Types.ObjectId.isValid(productId))
+    throw new ApiError(400, "Invalid productId");
+
+  if (!Number.isInteger(quantity) || quantity <= 0)
+    throw new ApiError(400, "Quantity must be a positive integer");
 
   const product = await Product.findOne({ _id: productId, isActive: true });
   if (!product) throw new ApiError(404, "Product not found/inactive");
@@ -32,20 +38,35 @@ exports.addToCart = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Added to cart", data: cart });
 });
 
+
+/* ======================================================
+   GET CART
+====================================================== */
 exports.getCart = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-  const cart = await Cart.findOne({ user: userId }).populate("items.product");
-  if (!cart) throw new ApiError(404, "Cart not found");
+
+  let cart = await Cart.findOne({ user: userId })
+    .populate("items.product", "name price productImages isActive quantity");
+
+  if (!cart) cart = await Cart.create({ user: userId, items: [] });
+
   res.json({ success: true, data: cart });
 });
 
+
+/* ======================================================
+   UPDATE CART ITEM QUANTITY
+====================================================== */
 exports.updateCartItemQuantity = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { productId } = req.params;
-  const { quantity } = req.body;
+  let { quantity } = req.body;
 
-  if (!mongoose.Types.ObjectId.isValid(productId)) throw new ApiError(400, "Invalid productId");
-  if (typeof quantity !== "number") throw new ApiError(400, "Quantity must be number");
+  if (!mongoose.Types.ObjectId.isValid(productId))
+    throw new ApiError(400, "Invalid productId");
+
+  if (!Number.isInteger(quantity))
+    throw new ApiError(400, "Quantity must be an integer");
 
   const cart = await Cart.findOne({ user: userId });
   if (!cart) throw new ApiError(404, "Cart not found");
@@ -70,11 +91,16 @@ exports.updateCartItemQuantity = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Cart updated", data: cart });
 });
 
+
+/* ======================================================
+   REMOVE ITEM FROM CART
+====================================================== */
 exports.removeFromCart = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { productId } = req.params;
 
-  if (!mongoose.Types.ObjectId.isValid(productId)) throw new ApiError(400, "Invalid productId");
+  if (!mongoose.Types.ObjectId.isValid(productId))
+    throw new ApiError(400, "Invalid productId");
 
   const cart = await Cart.findOne({ user: userId });
   if (!cart) throw new ApiError(404, "Cart not found");
@@ -85,6 +111,10 @@ exports.removeFromCart = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Item removed", data: cart });
 });
 
+
+/* ======================================================
+   CLEAR CART
+====================================================== */
 exports.clearCart = asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
@@ -97,12 +127,22 @@ exports.clearCart = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Cart cleared", data: cart });
 });
 
+
+/* ======================================================
+   GET CART TOTAL (SAFE)
+====================================================== */
 exports.getCartTotal = asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
-  const cart = await Cart.findOne({ user: userId }).populate("items.product");
+  const cart = await Cart.findOne({ user: userId })
+    .populate("items.product", "price isActive");
+
   if (!cart) throw new ApiError(404, "Cart not found");
 
-  const total = cart.items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  const total = cart.items.reduce((sum, item) => {
+    if (!item.product || !item.product.isActive) return sum;
+    return sum + item.product.price * item.quantity;
+  }, 0);
+
   res.json({ success: true, data: total });
 });

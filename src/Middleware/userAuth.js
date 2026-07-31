@@ -121,3 +121,20 @@ exports.isSellerOrAdmin = (req, res, next) => {
   next();
 };
 
+
+
+
+// Admin OR SuperAdmin Authorization Middleware
+exports.isAdminOrSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Unauthorized: No user data" });
+  }
+
+  const role = req.user.role;
+
+  if (role !== "admin" && role !== "superadmin") {
+    return res.status(403).json({ success: false, message: "Forbidden: Admin or SuperAdmin only" });
+  }
+
+  next();
+};
